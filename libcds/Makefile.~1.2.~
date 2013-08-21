@@ -1,0 +1,29 @@
+
+all: clean libcompact tests
+
+
+doc:
+	@echo " [DOC] Generating documentation"
+	@doxygen
+
+libcompact: 
+	@echo " [MSG] Entering directory src"
+	@make --no-print-directory -C src
+	
+tests: libcompact
+	@echo " [MSG] Entering directory tests"
+	@make --no-print-directory -C tests
+
+clean:
+	@echo " [MSG] Entering directory src"
+	@make --no-print-directory -C src clean
+	@echo " [MSG] Entering directory tests"
+	@make --no-print-directory -C tests clean
+	@echo " [CLN] Cleaning docs folder"
+	@touch docs/delete_me
+	@echo " [CLN] Cleaning lib folder"
+	@touch lib/delete_me
+	@echo " [CLN] Cleaning includes folder"
+	@touch includes/delete_me
+
+
