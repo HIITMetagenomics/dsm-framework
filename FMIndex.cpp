@@ -39,9 +39,15 @@ const char FMIndex::ALPHABET_SHIFTED[] = {1, ' '+1, '#'+1,
            '.'+1, '0'+1, '1'+1, '2'+1, '3'+1,
            'A'+1, 'C'+1, 'G'+1, 'M'+1, 'N'+1, 'R'+1, 'T'+1};
 
-// Save file version info
-const uchar FMIndex::versionFlag = 13;
-
+/**
+ * Save file version info
+ *
+ * v13 was using libcds! 
+ * v14 uses HuffWT, 
+ * v15 uses ulong C[c], 
+ * v16 uses ulong codetable
+ */
+const uchar FMIndex::versionFlag = 16;
 
 /**
  * Given suffix i and substring length l, return T[SA[i] ... SA[i]+l].
@@ -85,7 +91,7 @@ uchar * FMIndex::getSuffix(TextPosition dest, unsigned l) const
 FMIndex::FMIndex(uchar * bwt, ulong length, unsigned samplerate_, unsigned numberOfTexts_, 
                  ulong maxTextLength_, ulong numberOfSamples_, vector<std::string> &name_,
                  bool storePlainText, bool colorCoded_, unsigned rotationLength_)
-    : TextCollection(colorCoded_, rotationLength_), n(length), samplerate(samplerate_), alphabetrank(0), 
+    : TextCollection(colorCoded_, rotationLength_), n(length), samplerate(samplerate_), bwtEndPos(0), alphabetrank(0), 
       sampled(0), suffixes(0), suffixDocId(0), numberOfTexts(numberOfTexts_), maxTextLength(maxTextLength_), Doc(0), 
       textStorage(0), name(0), textLength(0)
 {
@@ -117,7 +123,8 @@ FMIndex::FMIndex(uchar * bwt, ulong length, unsigned samplerate_, unsigned numbe
 
 void FMIndex::saveSamples(std::string const & filename)
 {
-    makesamples();
+//    makesamples();
+    maketables(n/samplerate+1, false);
     cerr << "Saving samples..." << endl;
 
     std::string name = filename + ".sa";
@@ -127,6 +134,12 @@ void FMIndex::saveSamples(std::string const & filename)
         sampled->save(file);
     if (suffixes)
         suffixes->Save(file);
+    if (suffixDocId)
+        suffixDocId->Save(file);
+    if (textLength)
+        textLength->Save(file);
+    if (Doc)
+        Doc->save(file);
 
     fflush(file);
     std::fclose(file);
@@ -153,14 +166,15 @@ void FMIndex::save(std::string const & filename) const
     if (std::fwrite(&(this->samplerate), sizeof(unsigned), 1, file) != 1)
         throw std::runtime_error("FMIndex::save(): file write error (samplerate).");
 
-    for(ulong i = 0; i < 256; ++i)
-        if (std::fwrite(this->C + i, sizeof(unsigned), 1, file) != 1)
-            throw std::runtime_error("FMIndex::save(): file write error (C table).");
+    if (std::fwrite(this->C, sizeof(ulong), 256, file) != 256)
+        throw std::runtime_error("FMIndex::save(): file write error (C table).");
 
     if (std::fwrite(&(this->bwtEndPos), sizeof(TextPosition), 1, file) != 1)
         throw std::runtime_error("FMIndex::save(): file write error (bwt end position).");
         
-    alphabetrank->save(file);
+//    alphabetrank->save(file);
+    HuffWT::save(alphabetrank, file);
+
     if (suffixDocId)
         suffixDocId->Save(file);
     if (textLength)
@@ -201,6 +215,25 @@ void FMIndex::save(std::string const & filename) const
     std::fclose(file);
 }
 
+void FMIndex::recomputeC()
+{
+    ulong i;
+    for (i=0;i<256;i++)
+        C[i]=0;
+    for (i=0;i<n;++i)
+    {
+        if (i%100000000 == 0)
+            cerr << "recomputing C, i = " << i << endl;
+        C[(int)alphabetrank->access(i)]++;
+    }
+    ulong prev=C[0], temp;
+    C[0]=0;
+    for (i=1;i<256;i++) {          
+        temp = C[i];
+        C[i]=C[i-1]+prev;
+        prev = temp;
+    }
+}
 
 /**
  * Load index from a file handle
@@ -230,9 +263,9 @@ FMIndex::FMIndex(std::string const & filename, std::string const & samplefile = 
     uchar verFlag = 0;
     if (std::fread(&verFlag, 1, 1, file) != 1)
         throw std::runtime_error("file read error: incorrect version flag! Please reconstruct the index");
-    if (verFlag != FMIndex::versionFlag)
+    if (verFlag != FMIndex::versionFlag && verFlag != 15 && verFlag != 14)
         throw std::runtime_error("FMIndex::FMIndex(): invalid save file version.");
-
+//    cerr << "verFlag = " << (int)verFlag << endl;
     if (std::fread(&(this->n), sizeof(TextPosition), 1, file) != 1)
         throw std::runtime_error("FMIndex::FMIndex(): file read error (n).");
     if (std::fread(&samplerate, sizeof(unsigned), 1, file) != 1)
@@ -241,18 +274,34 @@ FMIndex::FMIndex(std::string const & filename, std::string const & samplefile = 
 //    if (this->samplerate == 0)
 //        this->samplerate = samplerate;
 
-    for(ulong i = 0; i < 256; ++i)
-        if (std::fread(this->C + i, sizeof(unsigned), 1, file) != 1)
+    if (verFlag == 14)
+    {
+        // Values are stored in unsigned size variable
+        for(ulong i = 0; i < 256; ++i)
+        {
+            unsigned j = 0;
+            if (std::fread(&j, sizeof(unsigned), 1, file) != 1)
+            throw std::runtime_error("FMIndex::FMIndex(): file read error (C table).");
+            C[i] = j;
+        }
+    }
+    else
+        if (std::fread(this->C, sizeof(ulong), 256, file) != 256)
             throw std::runtime_error("FMIndex::FMIndex(): file read error (C table).");
 
     if (std::fread(&(this->bwtEndPos), sizeof(TextPosition), 1, file) != 1)
         throw std::runtime_error("FMIndex::FMIndex(): file read error (bwt end position).");
 
-    alphabetrank = static_sequence::load(file);
+    //alphabetrank = static_sequence::load(file);
+    alphabetrank = HuffWT::load(file, verFlag);
+
     if (safile)
     {
         sampled = static_bitsequence::load(safile);
         suffixes = new BlockArray(safile);
+        suffixDocId = new BlockArray(safile);
+        textLength = new BlockArray(safile);
+        Doc = new ArrayDoc(safile);
     }
 /*    suffixDocId = new BlockArray(file);  FIXME disabled
     textLength = new BlockArray(file);*/
@@ -289,6 +338,19 @@ FMIndex::FMIndex(std::string const & filename, std::string const & samplefile = 
     std::fclose(file);
     // FIXME Construct data structures with new samplerate
     //maketables(); 
+
+
+    for(ulong i = 1; i < 256; ++i)
+    {
+//        cerr << "C[" << i << "] = " << C[i] << endl;
+        if (i && C[i] < C[i-1])
+        {
+            cerr << "C has truncated values, recomputing... version = " << (int)verFlag << endl;
+            recomputeC();
+            save(name + ".reC");
+            break;
+        }
+    }
 }
 
 
@@ -317,7 +379,7 @@ ulong FMIndex::Search(uchar const * pattern, TextPosition m, TextPosition *spRes
 
 
 FMIndex::~FMIndex() {
-    delete alphabetrank;       
+    HuffWT::deleteHuffWT(alphabetrank);
     delete sampled;
     delete suffixes;
     delete suffixDocId;
@@ -329,16 +391,11 @@ FMIndex::~FMIndex() {
 
 void FMIndex::makewavelet(uchar *bwt)
 {
-    ulong i, min = 0,
-             max;
+    ulong i;
     for (i=0;i<256;i++)
         C[i]=0;
     for (i=0;i<n;++i)
         C[(int)bwt[i]]++;
-    for (i=0;i<256;i++)
-        if (C[i]>0) {min = i; break;}          
-    for (i=255;i>=min;--i)
-        if (C[i]>0) {max = i; break;}
     
     ulong prev=C[0], temp;
     C[0]=0;
@@ -348,12 +405,79 @@ void FMIndex::makewavelet(uchar *bwt)
         prev = temp;
     }
 
-    alphabet_mapper * am = new alphabet_mapper_none();
+/*    alphabet_mapper * am = new alphabet_mapper_none();
     static_bitsequence_builder * bmb = new static_bitsequence_builder_brw32(8); // FIXME samplerate?
     wt_coder * wtc = new wt_coder_huff(bwt,n,am); // FIXME Huffman is not thread-safe
     alphabetrank = new static_sequence_wvtree(bwt,n,wtc,bmb,am);
     delete bmb;
     bwt = 0; // already deleted
+*/
+
+
+    std::cerr << "Constructing HuffWT.." << std::endl;
+    alphabetrank = HuffWT::makeHuffWT(bwt, n);
+    std::cerr << "Done." << std::endl;
+//    delete [] bwt; // Was deleted
+    bwt = 0;
+}
+
+unsigned FMIndex::outputReads(ResultSet *results)
+{
+    // Calculate BWT end-marker position (of last inserted text)
+    {
+        ulong i = 0;
+        ulong alphabetrank_i_tmp = 0;
+        uchar c  = alphabetrank->access(i, alphabetrank_i_tmp);
+        while (c != '\0')
+        {
+            i = C[c]+alphabetrank_i_tmp-1;
+            c = alphabetrank->access(i, alphabetrank_i_tmp);
+        }
+
+        this->bwtEndPos = i;
+    }
+
+    string curRead;
+    curRead.reserve(1024);
+
+    DocId textId = numberOfTexts;
+    assert(textId != 0);
+    ulong p=bwtEndPos;
+    unsigned nreads = 0;
+    ulong ulongmax = 0; ulongmax--;
+    ulong alphabetrank_i_tmp =0;
+    bool output = false;
+    for (ulong i=n-1;i<ulongmax;i--) 
+    {        
+        if (i % 100000000 == 0)
+            cerr << "i = " << i << ", processing..." << endl;
+        uchar c = alphabetrank->access(p, alphabetrank_i_tmp);
+        if (results->get(p))
+            output = true;
+
+        if (c == '\0')
+        {
+            --textId;
+
+            if (output)
+            {
+                ++nreads;
+                printf("> %u\n%s\n", textId, curRead.c_str());
+            }
+            curRead.clear();
+            output = false;
+
+            // LF-mapping from '\0' does not work with this (pseudo) BWT (see details from Wolfgang's thesis).
+            p = textId; // Correct LF-mapping to the last char of the previous text.
+        }
+        else // Now c != '\0', do LF-mapping:
+        {
+            curRead.push_back((char)c);
+            p = C[c]+alphabetrank_i_tmp-1;
+        }
+    }
+    assert(textId == 0);
+    return nreads;
 }
 
 void FMIndex::makesamples()
@@ -361,7 +485,7 @@ void FMIndex::makesamples()
     // Calculate BWT end-marker position (of last inserted text)
     {
         ulong i = 0;
-        uint alphabetrank_i_tmp = 0;
+        ulong alphabetrank_i_tmp = 0; // ...was uint originally
         uchar c  = alphabetrank->access(i, alphabetrank_i_tmp);
         while (c != '\0')
         {
@@ -381,7 +505,7 @@ void FMIndex::makesamples()
     ulong p=bwtEndPos;
     ulong sampleCount = 0;
     ulong ulongmax = 0; ulongmax--;
-    uint alphabetrank_i_tmp =0;
+    ulong alphabetrank_i_tmp =0;
     for (ulong i=n-1;i<ulongmax;i--) 
     {        
         uchar c = alphabetrank->access(p, alphabetrank_i_tmp);
@@ -445,7 +569,7 @@ void FMIndex::maketables(ulong sampleLength, bool storePlainText)
     // Calculate BWT end-marker position (of last inserted text)
     {
         ulong i = 0;
-        uint alphabetrank_i_tmp = 0;
+        ulong alphabetrank_i_tmp = 0;
         uchar c  = alphabetrank->access(i, alphabetrank_i_tmp);
         while (c != '\0')
         {
@@ -476,7 +600,7 @@ void FMIndex::maketables(ulong sampleLength, bool storePlainText)
     DocId textId = numberOfTexts;
     ulong ulongmax = 0;
     ulongmax--;
-    uint alphabetrank_i_tmp =0;
+    ulong alphabetrank_i_tmp =0;
 
     uchar *plainText = 0;
     if (storePlainText)
@@ -534,17 +658,16 @@ void FMIndex::maketables(ulong sampleLength, bool storePlainText)
 
     sampled = new static_bitsequence_brw32(sampledpositions, n, 16);
     delete [] sampledpositions;
-    assert(sampleCount == sampleLength);
-    assert(sampled->rank1(n-1) == sampleLength);
+    assert(sampled->rank1(n-1) == sampleCount);
 
     // Suffixes store an offset from the text start position
-    suffixes = new BlockArray(sampleLength, Tools::CeilLog2(maxTextLength));
-    suffixDocId = new BlockArray(sampleLength, Tools::CeilLog2(numberOfTexts));
+    suffixes = new BlockArray(sampleCount, Tools::CeilLog2(maxTextLength));
+    suffixDocId = new BlockArray(sampleCount, Tools::CeilLog2(numberOfTexts));
 
     x = n - 2;
     posOfSuccEndmarker = n-1;
     textId = numberOfTexts - 1;
-    for(ulong i=0; i<sampleLength; i++) {
+    for(ulong i=0; i<sampleCount; i++) {
         // Find next sampled text position
         while ((posOfSuccEndmarker - x) % samplerate != 0)
         {
@@ -556,7 +679,7 @@ void FMIndex::maketables(ulong sampleLength, bool storePlainText)
         assert((*positions)[i] < n);
         ulong j = sampled->rank1((*positions)[i]);
 
-        assert(j != 0); // if (j==0) j=sampleLength;
+        assert(j != 0); // if (j==0) j=sampleCount;
         
         TextPosition textPos = (x==n-1)?0:x+1;
         (*suffixDocId)[j-1] = DocIdAtTextPos(textStartPos, textPos);

@@ -24,8 +24,9 @@
 class TrieReader
 {
 public:
-    TrieReader(int i, std::string name, ServerSocket *ssocket, bool vrbs, bool dbg)
-        : id(i), filename(name), ifs(ssocket), verbose(vrbs), debug(dbg), rate(time(NULL)), n(0), occs(0)
+    TrieReader(int i, std::string name, ServerSocket *ssocket, bool vrbs, bool dbg, bool pos = 0)
+    : id(i), positive(pos), filename(name), ifs(ssocket), verbose(vrbs), debug(dbg), 
+        rate(time(NULL)), n(0), occs(0)
     { }
 
     bool hasChild()
@@ -70,11 +71,13 @@ public:
         return occs;
     }
 
-    void readClose()
+    char readClose() // Returns the left-char symbol
     {
+        char leftChar = ifs->getc();
         char c = ifs->getc();
         if (c != ')')
             perror(std::string("expecting ) byte but got ") + c);
+        return leftChar;
     }
 
 
@@ -111,6 +114,8 @@ public:
     { return occs; }
     int getId()
     { return id; }
+    int isPositive()
+    { return positive; }
     std::string getName()
     { return filename; }
 
@@ -213,6 +218,7 @@ protected:
     }
 
     int id;
+    bool positive;
     std::string filename;
     ServerSocket *ifs;
     bool verbose;

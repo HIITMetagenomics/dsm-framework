@@ -25,13 +25,15 @@
 #include "BlockArray.h"
 #include "ArrayDoc.h"
 #include "TextStorage.h"
+#include "HuffWT.h"
+#include "ResultSet.h"
 
 // Include  from XMLTree/libcds
 #include <basics.h> // Defines W == 32
 #include <static_bitsequence.h>
-#include <alphabet_mapper.h>
-#include <static_sequence.h>
-#include <static_sequence_wvtree_noptrs.h>
+//#include <alphabet_mapper.h>
+//#include <static_sequence.h>
+//#include <static_sequence_wvtree_noptrs.h>
 
 // Re-define word size to ulong:
 #undef W
@@ -65,6 +67,10 @@ public:
     // Return total lenght of text (including 0-terminators).
     inline TextPosition getLength() const
     { return n; }
+    DocId getNumberOfTexts() const
+    { return numberOfTexts; }
+
+    unsigned outputReads(ResultSet *);
 
     /**
      * Return lenght of i'th text (excluding 0-terminators).
@@ -79,6 +85,7 @@ public:
     {
         if (C[(int)c+1]-C[(int)c] == 0) // FIXME fix alphabet
             return C[(int)c];
+        //std::cerr << "LF for " << (int) c << ", pos = " << i << ", is C = " << C[(int)c] << " plus " << alphabetrank->rank(c, i) << std::endl;
         return C[(int)c] + alphabetrank->rank(c, i);
     } 
 
@@ -97,7 +104,8 @@ public:
     // For given suffix i, return corresponding DocId and text position.
     inline void getPosition(position_result &result, TextPosition i) const
     {
-        uint tmp_rank_c = 0; // Cache rank value of c.
+        // tmp_rank_c was uint originally
+        TextPosition tmp_rank_c = 0; // Cache rank value of c.
         TextPosition dist = 0;
         uchar c = alphabetrank->access(i, tmp_rank_c);
         while (c != '\0' && !sampled->access(i))
@@ -109,7 +117,7 @@ public:
         if (c == '\0')
         {
             // Rank among the end-markers in BWT
-            unsigned endmarkerRank = tmp_rank_c-1; //alphabetrank->rank(0, i) - 1;
+            ulong endmarkerRank = tmp_rank_c-1; //alphabetrank->rank(0, i) - 1;
             result.first = Doc->access(endmarkerRank);
             result.second =  dist; 
         }
@@ -128,7 +136,7 @@ public:
     {
         result.reserve(result.size() + ep-sp+1);
 
-        uint tmp_rank_c = 0; // Cache rank value of c.
+        ulong tmp_rank_c = 0; // Cache rank value of c.
         for (; sp <= ep; ++sp)
         {
             TextPosition i = sp;
@@ -175,9 +183,10 @@ private:
     static const uchar versionFlag;
     TextPosition n;
     unsigned samplerate;
-    unsigned C[256];
+    ulong C[256];
     TextPosition bwtEndPos;
-    static_sequence * alphabetrank;
+    //static_sequence * alphabetrank;
+    HuffWT *alphabetrank;
 
     // Sample structures for texts longer than samplerate
     static_bitsequence * sampled;
@@ -202,6 +211,7 @@ private:
 
     // Following methods are not part of the public API
     uchar * BWT(uchar *);
+    void recomputeC();
     void makewavelet(uchar *);
     void maketables(ulong, bool);
     void makesamples();

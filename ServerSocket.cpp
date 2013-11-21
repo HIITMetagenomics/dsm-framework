@@ -28,6 +28,8 @@ int ServerSocket::init(int port)
         error("socket failed");
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
         error("setsockopt failed");
+    /*if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(int)) == -1)
+      error("setsockopt KEEPALIVE failed");*/
     
     my_addr.sin_family = AF_INET;         // host byte order
     my_addr.sin_port = htons(port);     // short, network byte order
@@ -48,7 +50,7 @@ int ServerSocket::init(int port)
 ServerSocket * ServerSocket::create(int sockfd)
 {
     struct sockaddr_in their_addr; // connector's address information
-    socklen_t sin_size;
+    socklen_t sin_size = sizeof(struct sockaddr_in);
 
     int new_fd = 0;
     if ((new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size)) == -1) 
@@ -57,6 +59,12 @@ ServerSocket * ServerSocket::create(int sockfd)
     char const * ip = inet_ntoa(their_addr.sin_addr); 
     cerr << "server: New connection from " << ip << ", socket " << new_fd << endl;
 
+    /* Checking KEEPALIVE
+    int optval = 0;
+    socklen_t optsize = sizeof(int);
+    if(getsockopt(new_fd, SOL_SOCKET, SO_KEEPALIVE, &optval, &optsize) < 0)
+        error("getsockopt failed");
+        cerr << "SO_KEEPALIVE is " << (optval ? "ON" : "OFF") << endl;*/
     return new ServerSocket(new_fd);
 }
 
@@ -102,6 +110,14 @@ void ServerSocket::writenonblocking(int fd, const char *vptr, size_t n)
 
 void ServerSocket::readBuffer()
 {
+/*    cerr << "BUFFER UPDATE!!!!" << endl << "\"";
+    for (unsigned i = 0; i < n; ++i)
+        if (buffer[i] < 20)
+            std::cerr << (int)buffer[i];
+        else
+            std::cerr << buffer[i];
+            cerr << "\"" << endl;*/
+
     if ((n = readn(sockfd, buffer, BUFFER_SIZE)) < 1)
         eof = true;
 

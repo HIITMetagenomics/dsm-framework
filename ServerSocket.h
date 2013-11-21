@@ -55,6 +55,18 @@ public:
             u |= (j & 0xFFlu) << (8*i); // FIXME Should use CHAR_BIT
         }
         
+/*        char c = getc();
+        if (c != 'F')
+        {
+            std::cerr << "Expecting F byte" << std::endl;
+            std::exit(1);
+        }
+        ulong u = 0;
+        for (size_t i = 0; i < sizeof(ulong); ++i)
+        {
+            ulong j = getc();
+            u |= (j & 0xFFlu) << (8*i); // FIXME Should use CHAR_BIT
+            }*/
         return u;
     }
 
@@ -75,6 +87,7 @@ public:
 
     void writeHalt(ulong n, ulong depth)
     {
+//        std::cerr << "sent message n = " << n << ", depth = " << depth << std::endl;
         ulong c[2];
         c[0] = ((ulong)'H') | (depth << 8);
         c[1] = n;

@@ -1,6 +1,6 @@
 #include "TrieReader.h"
-
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include <map>
 #include <sstream>
@@ -16,23 +16,19 @@ using namespace std;
 
 #define MAX_READERS 273
 #define MAX_CHILDREN 4   // ACGT
+#define PTHRESHOLD 10.0
 
 typedef unordered_set<unsigned> readerset;
 
 /**
  * Definitions for parsing command line options
  */
-enum align_mode_t { mode_undef, mode_mismatch, mode_rotation,
-                    mode_indel, mode_gap, mode_matepair };
-
-enum parameter_t { long_opt_all = 256, long_opt_maxgap,
-                   long_opt_minprefix, long_opt_skip, long_opt_nreads,
-                   long_opt_debug, long_opt_recursion };
+enum parameter_t { long_opt_debug = 256, long_opt_discriminative };
 
 void print_usage(char const *name)
 {
     cerr << "usage: " << name << " [options]" << endl
-         << "Check README or `" << name << " --help' for more information." << endl;
+         << "Check README or `" << name << " --help' for more information ." << endl;
 }
 
 void print_help(char const *name)
@@ -42,12 +38,12 @@ void print_help(char const *name)
          << "  <stdin>       A list of expected library names." << endl
          << endl 
          << "Options:" << endl
-         << " --port <p>     Listen to port number p." << endl
-         << " --topfreq <p>  Print the top-p output frequencies." << endl
-         << " --toptimes <p> Print the top-p latencies." << endl
-         << " --verbose      Print progress information." << endl
-         << " --debug        More verbose but still safe." << endl
-         << " --outputall    Even more verbose (not safe)." << endl;
+         << "-p,--port <p>     Listen to port number p." << endl
+         << "-F,--topfreq <p>  Print the top-p output frequencies." << endl
+         << "-T,--toptimes <p> Print the top-p latencies." << endl
+         << "-v,--verbose      Print progress information." << endl
+         << "--debug           More verbose but still safe." << endl
+         << "-A,--outputall    Even more verbose (not safe)." << endl;
 }
 
 int atoi_min(char const *value, int min, char const *parameter, char const *name)
@@ -57,14 +53,35 @@ int atoi_min(char const *value, int min, char const *parameter, char const *name
     char c;
     if (!(iss >> i) || iss.get(c))
     {
-        cerr << "readaligner: argument of " << parameter << " must be of type <int>, and greater than or equal to " << min << endl
+        cerr << name << ": argument of " << parameter << " must be of type <int>, and greater than or equal to " << min << endl
              << "Check README or `" << name << " --help' for more information." << endl;
         std::exit(1);
     }
 
     if (i < min)
     {
-        cerr << "readaligner: argument of " << parameter << " must be greater than or equal to " << min << endl
+        cerr << name << ": argument of " << parameter << " must be greater than or equal to " << min << endl
+             << "Check README or `" << name << " --help' for more information." << endl;
+        std::exit(1);
+    }
+    return i;
+}
+
+double atof_min(char const *value, double min, char const *parameter, char const *name)
+{
+    std::istringstream iss(value);
+    double i;
+    char c;
+    if (!(iss >> i) || iss.get(c))
+    {
+        cerr << name << ": argument of " << parameter << " must be of type <double>, and greater than or equal to " << min << endl
+             << "Check README or `" << name << " --help' for more information." << endl;
+        std::exit(1);
+    }
+
+    if (i < min)
+    {
+        cerr << name << ": argument of " << parameter << " must be greater than or equal to " << min << endl
              << "Check README or `" << name << " --help' for more information." << endl;
         std::exit(1);
     }
@@ -91,8 +108,11 @@ bool outputall = false; // For debugging only!
 bool verbose = false;
 int toptimes = 0;
 int topfreq = 0;
-unsigned pmin = 2;
+unsigned mindepth = 0;
+unsigned pmin=2;
+
 time_t wctime = time(NULL);
+ulong tnbin_discard = 0;
 ulong total_paths = 0;
 ulong total_output = 0;
 ulong total_occs = 0;
@@ -109,7 +129,6 @@ inline bool moreChildren(vector<readerset> const &children)
             return true;
     return false;
 }
-
 
 /**
  * Updates the currently active triereaders by reading their next child.
@@ -163,6 +182,7 @@ void traverseOne(unsigned reader)
     // Note: Even if output == false, we need to iterate through readOccs()
     TrieReader *tr = allreaders[reader];
     tr->readOccs();
+
     tr->readClose();  // Closing parenthesis is read & checked
     ++total_paths; // No output, pmin > 1 here
 }
@@ -195,19 +215,22 @@ void traverseOneWithOutput(unsigned reader)
     if (path.size() <= 6)
         tr->checkR(); // Checksum is written for nodes at levels <7.
 
-    tr->readClose();  // Closing parenthesis is read & checked
+    char leftChar = tr->readClose();  // Closing parenthesis is read & checked
 
-    // Always output here...
+    // Check if we output?
     ++total_paths;
-    ++total_output;
-    ++freqhistogram[1];
-    cout << path << " " << tr->getId() << ":" << occs << '\n';
-    ++total_occs;    
+    if ((leftChar == '0' || leftChar == 'N') && path.size() >= mindepth) // assert (pmin == 1)
+    {
+        ++total_output;
+        ++freqhistogram[0];
+        cout << path << " " << tr->getId() << ":" << occs << '\n';
+        ++total_occs;
+    }
 }
 
 void traverse(readerset const &treaders)
 {
-    if (outputall || (path.size() <= (5+ 2*(unsigned)debug) && verbose))
+    if (outputall || (path.size() <= (5 + 2*(unsigned)debug) && verbose))
     {
         // Sort the readers by least activity (longest pause time)
         if (toptimes)
@@ -243,20 +266,17 @@ void traverse(readerset const &treaders)
             cerr << ">" << endl;
         }
         cerr << "current path is " << path
-             << " (" << treaders.size() << " active, " 
-             << total_output << " reported, " 
-             << total_occs << " occs, " 
-             << std::difftime(time(NULL), wctime) << " s, " 
+             << " (" << treaders.size() 
+             << " active, " << total_output 
+             << " reported, " << total_occs 
+             << " occs, " << std::difftime(time(NULL), wctime) << " s, " 
              << std::difftime(time(NULL), wctime) / 3600 << " hrs)" << endl;
     }
 
-    if (treaders.size() == 1)
+    if (treaders.size() == 1 && pmin > 1)
     {
         readerset::const_iterator it = treaders.begin();
-        if (pmin > 1)
-            traverseOne(*it);
-        else
-            traverseOneWithOutput(*it);
+        traverseOne(*it);
         return;
     }
 
@@ -290,39 +310,57 @@ void traverse(readerset const &treaders)
         exit(1);
     }
     
-    // Output currently active readers (post-order)
+    // Traverse currently active readers (post-order)
     // Note: Output only if path is not in every set
     // Note: Even if output == false, we need to iterate through readOccs()
+    char leftChar = 0;
     for (readerset::const_iterator it = treaders.begin(); it != treaders.end(); ++it)
     {
         TrieReader *tr = allreaders[*it];
-        tr->readOccs();
+        ulong freq = tr->readOccs();
+        /* process frequencies here */
+
         if (path.size() <= 6)
             tr->checkR(); // Checksum is written for nodes at levels <7.
-        tr->readClose();  // Closing parenthesis is read & checked
+        char lChar = tr->readClose();  // Closing parenthesis is read & checked
+        if (leftChar == 0)
+            leftChar = lChar;
+        else if (leftChar != lChar)
+            leftChar = 'N';
     }
+
+    assert(leftChar != 0);
+
+    /**
+     * Test for output conditions
+     */
     bool output = true;
-    if (treaders.size() == allreaders.size())
+    if (path.size() < mindepth)
         output = false;
+    //if (treaders.size() == allreaders.size())
+    //    output = false; // pmax disabled
     if (treaders.size() < pmin)
         output = false;
+
     if (numberOfChildren == 1 && treaders.size() == atr.size())
+        output = false; // not right branching
+    if (leftChar == 'A' || leftChar == 'C' || leftChar == 'G' || leftChar == 'T')
         output = false; // not left branching
     
     ++total_paths;
     if (output) 
     {
         ++total_output;
-        ++freqhistogram[treaders.size()];
-        cout << path;
+        ++freqhistogram[treaders.size() - 1];
+        printf("%s", path.c_str());
         
         for (readerset::const_iterator it = treaders.begin(); it != treaders.end(); ++it)
         {
-            TrieReader *tr = allreaders[*it];
-            cout << ' ' << tr->getId() << ':' << tr->getOccs();
+            TrieReader *tr = allreaders[*it];            
+            printf(" %d:%lu", tr->getId(), tr->getOccs());
             ++total_occs;
         }
-        cout << '\n';
+        printf("\n");
     }
 }
 
@@ -347,23 +385,30 @@ int main(int argc, char **argv)
     /**
      * Parse command line parameters
      */
+    if (argc <= 1)
+    {
+        print_usage(argv[0]);
+        return 1;
+    }
+
     int portno = 54666;
 
     static struct option long_options[] =
         {
-            {"pmin",   required_argument, 0, 'P'},
-            {"port",   required_argument, 0, 'p'},
-            {"topfreq",   required_argument, 0, 'F'},
-            {"toptimes",  required_argument, 0, 'T'},
-            {"verbose",   no_argument,       0, 'v'},
-            {"help",      no_argument,       0, 'h'},
-            {"debug",     no_argument,       0, long_opt_debug},
-            {"outputall", no_argument,       0, 'A'},
+            {"port",           required_argument, 0, 'p'},
+            {"pmin",           required_argument, 0, 'P'},
+            {"mindepth",       required_argument, 0, 'm'},
+            {"topfreq",        required_argument, 0, 'F'},
+            {"toptimes",       required_argument, 0, 'T'},
+            {"verbose",        no_argument,       0, 'v'},
+            {"help",           no_argument,       0, 'h'},
+            {"debug",          no_argument,       0, long_opt_debug},
+            {"outputall",      no_argument,       0, 'A'},
             {0, 0, 0, 0}
         };
     int option_index = 0;
     int c;
-    while ((c = getopt_long(argc, argv, "P:p:F:T:vhA",
+    while ((c = getopt_long(argc, argv, "p:m:F:T:vhA",
                                  long_options, &option_index)) != -1) 
     {
         switch(c) 
@@ -372,6 +417,10 @@ int main(int argc, char **argv)
             pmin = atoi_min(optarg, 1, "-P, --pmin", argv[0]) ; break;
         case 'p':
             portno = atoi_min(optarg, 1024, "-p, --port", argv[0]) ; break;
+        case 'm':
+            mindepth = atoi_min(optarg, 1, "-m, --mindepth", argv[0]);
+            cerr << "using min depth = " << mindepth << endl; 
+            break;
         case 'F':
             topfreq = atoi_min(optarg, 1, "--recursion", argv[0]) ; break;
         case 'T':
@@ -397,7 +446,7 @@ int main(int argc, char **argv)
      * Read list of input files
      */
     string line;
-    map<string,int> libtoid;
+    map<string,pair<int,bool> > libtoid;
     cerr << "Expected inputs:";
     while (cin.good())
     {
@@ -408,21 +457,26 @@ int main(int argc, char **argv)
             continue;
         }
         int id = libtoid.size();
-        if (verbose)
-            cerr << " " << id << " : " << line;
+        string name = line.substr(0, line.find_first_of('\t'));
+        if (verbose && id < 100)
+            cerr << " " << id << " : " << name;
+        if (verbose && id == 100)
+            cerr << " ...";
 
-        if (libtoid.find(line) != libtoid.end())
+        if (libtoid.find(name) != libtoid.end())
         {
-            cerr << endl << "DUPLICATE CLIENT NAME IN stdin! id = " << id << ", name = " << line << endl;
+            cerr << endl << "DUPLICATE CLIENT NAME IN stdin! id = " << id << ", name = " << name << endl;
             return 1;
         }
 
-        libtoid[line] = id;
+        libtoid[name] = make_pair(id,0);
     }
     cerr << endl;
 
     if (verbose)
+    {
         cerr << "Reading " << libtoid.size() << " input pipes from port " << portno << endl;
+    }
 
     if ( libtoid.size() > MAX_READERS )
     {
@@ -450,26 +504,34 @@ int main(int argc, char **argv)
             return 1;
         }
         string name = ss->getstring();
-        map<string,int>::iterator found = libtoid.find(name);
+        map<string,pair<int,bool> >::iterator found = libtoid.find(name);
         if (found == libtoid.end())
         {
             cerr << "received invalid libname: \"" << name << "\"" << endl;
             return 1;
         }
-        cerr << "new connection id = " << found->second << ", name = " << found->first << " (" << libtoid.size() << " pending)" << endl;
+        pair<int,bool> value = found->second;
+        int id = value.first;
+        bool positive = value.second;
 
-        TrieReader *tr = new TrieReader(found->second, found->first, ss, verbose, debug);
+        cerr << "new connection id = " << id << ", name = " << found->first << " (" << positive <<  ", " << libtoid.size()-1 << " pending";
+        if (libtoid.size() < 10)
+            for (map<string,pair<int,bool> >::const_iterator it = libtoid.begin(); it != libtoid.end(); ++it)
+                cerr << ", " << it->first; 
+        cerr << ")" << endl;
+
+        TrieReader *tr = new TrieReader(id, found->first, ss, verbose, debug, positive);
         if (! tr->good())
         {
             cerr << "unable to open input file: " << line << endl;
             return 1;
         }
-        if (allreaders[found->second])
+        if (allreaders[id])
         {
-            cerr << "DUPLICATE CONNECTING CLIENT! id = " << found->second << ", name = " << name << endl;
+            cerr << "DUPLICATE CONNECTING CLIENT! id = " << id << ", name = " << name << endl;
             return 1;
         }
-        allreaders[found->second] = tr;
+        allreaders[id] = tr;
         libtoid.erase(found);
     }
 
@@ -484,8 +546,6 @@ int main(int argc, char **argv)
 
     for (vector<TrieReader *>::iterator it = allreaders.begin(); it != allreaders.end(); ++it)
     {
-        if (distance(allreaders.begin(), it) != (*it)->getId())
-            cerr << "Warning: ID was changed for " << (*it)->getId() << " vs " << distance(allreaders.begin(), it) << endl;
         (*it)->checkEof();
         delete *it;
     }
@@ -494,7 +554,8 @@ int main(int argc, char **argv)
     {	
         cerr << "Number of paths: " << total_paths << endl
              << "Number of reported paths: " << total_output << endl
-             << "Number of reported occs: " << total_occs << endl;
+             << "Number of reported occs: " << total_occs << endl
+             << "Number of TNBin discarded paths: " << tnbin_discard << endl;
         cerr << "Wall-clock time: " << std::difftime(time(NULL), wctime) << " seconds (" 
              << std::difftime(time(NULL), wctime) / 3600 << " hours)" << endl;
     }

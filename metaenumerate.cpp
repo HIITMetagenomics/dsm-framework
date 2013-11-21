@@ -7,16 +7,22 @@
 using std::cout;
 using std::endl;
 using std::cerr;
+using std::cin;
 #include <string>
 using std::string;
+#include <vector>
+using std::vector;
 #include <ctime>
 #include <cstring>
 #include <getopt.h>
 #include <sys/resource.h>
-
-#ifdef PARALLEL_SUPPORT
 #include <omp.h>
-#endif
+
+struct host_info {
+    string name;
+    int port;
+    string enforcepath;
+};
 
 /**
  * Definitions for parsing command line options
@@ -30,23 +36,23 @@ enum parameter_t { long_opt_all = 256, long_opt_maxgap,
 
 void print_usage(char const *name)
 {
-    cerr << "usage: " << name << " [options] <index> <hostname>" << endl
+    cerr << "usage: " << name << " [options] <index>  < hostinfo.txt" << endl
          << "Check README or `" << name << " --help' for more information." << endl;
 }
 
 void print_help(char const *name)
 {
-    cerr << "usage: " << name << " [options] <index> <hostname>" << endl
+    cerr << "usage: " << name << " [options] <index>  < hostinfo.txt" << endl
          << endl
          << " <index>        Index file." <<endl
-         << " <hostname>     Host to connect to." <<endl <<endl
+         << " hostinfo       Text file containing list of hosts to connect to," << endl
+         << "                port n:o, and path to enumerate." <<endl <<endl
          << "Options: " <<endl
          << " --check        Check integrity of index and quit." << endl
          << " --port <p>     Connect to port <p>." <<endl
          << " --verbose      Print progress information." << endl
          << "Debug options:"<<endl
-         << " --debug        Print more progress information." << endl
-         << " --path <p>     Enumerate only below path p." << endl;
+         << " --debug        Print more progress information." << endl;
 }
 
 int atoi_min(char const *value, int min, char const *parameter, char const *name)
@@ -93,48 +99,30 @@ int checkIndex(TextCollection *tc, bool verbose)
     if (verbose) cerr << endl;
 
     // ALPHABET has been defined in BTSearch
-    for (const char *c = Query::ALPHABET_DNA; c < Query::ALPHABET_DNA + Query::ALPHABET_SIZE; ++c) 
+//    for (const char *c = Query::ALPHABET_DNA; c < Query::ALPHABET_DNA + Query::ALPHABET_SIZE; ++c) 
+    for (uchar c = 0; c < 255; ++c)
     {
-        ulong nmin = tc->LF(*c, 0lu - 1);
-        ulong nmax = tc->LF(*c, n-1)-1;    
+        ulong nmin = tc->LF(c, 0lu - 1);
+        ulong nmax = tc->LF(c, n-1)-1;    
         if (nmax >= nmin)
         {
-            if (verbose) cerr << *c << ": " << nmax-nmin+1 << endl;
+            if (verbose) cerr << (int)c << ": " << nmax-nmin+1 << endl;
             totals += nmax - nmin + 1;
         }
-        else
+/*        else
         {
             cout << "FAILED *********** ";
             cerr << "FAILED *********** ";
             exit(1);
-        }
+            }*/
     }
-
-    ulong nmin = tc->LF('N', 0lu-1);
-    ulong nmax = tc->LF('N', n-1)-1;    
-    if (nmax >= nmin)
-        totals += nmax - nmin + 1;
-    if (verbose) cerr << "N: " << nmax-nmin+1 << endl;
-
-    nmin = tc->LF(0, 0lu-1);
-    nmax = tc->LF(0, n-1)-1;    
-    if (nmax >= nmin)
-        totals += nmax - nmin + 1;
-    if (verbose) cerr << "0: " << nmax-nmin+1 << endl;
-
-    nmin = tc->LF('.', 0lu-1);
-    nmax = tc->LF('.', n-1)-1;    
-    if (nmax >= nmin)
-        totals += nmax - nmin + 1;
-    if (verbose) cerr << ".: " << nmax-nmin+1 << endl;
 
     if (n == totals)
         cerr << "OK     ";
     else
         cerr << "FAILED *********** ";
 
-    cerr  << std::showbase << "n = " << n << ", total = " << totals << ", number of . = " << nmax-nmin+1 << endl;
-    cout << n << endl;
+    cerr  << std::showbase << "n = " << n << ", total = " << totals << endl;
     return 0;
 }
 
@@ -152,31 +140,28 @@ int main(int argc, char **argv)
 
     unsigned fmin = 10;
     unsigned maxdepth = ~0u;
-    string enforcepath = "";
-    int portno = 54666;
     bool checkonly = false;
     bool debug = false;
     bool verbose = false;
-#ifdef PARALLEL_SUPPORT
-    unsigned parallel = 1;
+
+#ifndef PARALLEL_SUPPORT
+            cerr << "metaenumerate: Parallel processing not currently available!" << endl 
+                 << "Please recompile with parallel support; see README for more information." << endl;
+            return 1;
 #endif
 
     static struct option long_options[] =
         {
             {"fmin",      required_argument, 0, 'f'},
             {"maxdepth",  required_argument, 0, 'M'},
-            {"path",      required_argument, 0, 'D'}, // for debuging
-            {"port",      required_argument, 0, 'p'},
             {"check",     no_argument,       0, 'C'},
-            {"parallel",  required_argument, 0, 'P'},
             {"verbose",   no_argument,       0, 'v'},
-            {"help",      no_argument,       0, 'h'},
             {"debug",     no_argument,       0, long_opt_debug},
             {0, 0, 0, 0}
         };
     int option_index = 0;
     int c;
-    while ((c = getopt_long(argc, argv, "f:M:D:p:CP:vh",
+    while ((c = getopt_long(argc, argv, "f:M:Cvh",
                                  long_options, &option_index)) != -1) 
     {
         switch(c) 
@@ -184,22 +169,10 @@ int main(int argc, char **argv)
         case 'f':
             fmin = atoi_min(optarg, 1, "-f, --fmin", argv[0]); break;
         case 'M':
-            maxdepth = atoi_min(optarg, 75, "-M, --maxdepth", argv[0]); break;
-        case 'D':
-            enforcepath = string(optarg); break;
-        case 'p':
-            portno = atoi_min(optarg, 1024, "-p, --port", argv[0]); break;
+            maxdepth = atoi_min(optarg, 1, "-M, --maxdepth", argv[0]); break;
         case 'C':
             checkonly = true;
             break;
-        case 'P':
-#ifdef PARALLEL_SUPPORT
-            parallel = atoi_min(optarg, 0, "-P, --parallel", argv[0]); break;
-#else
-            cerr << "metaenumerate: Parallel processing not currently available!" << endl 
-                 << "Please recompile with parallel support; see README for more information." << endl;
-            return 1;
-#endif
         case 'v':
             verbose = true;
             break;
@@ -207,7 +180,7 @@ int main(int argc, char **argv)
             debug = true; break;
         case '?': 
         case 'h':
-            print_help(argv[0]);
+            print_usage(argv[0]);
             return 1;
         default:
             print_usage(argv[0]);
@@ -216,26 +189,52 @@ int main(int argc, char **argv)
     }
 
     // Parse filenames
-    if (argc - optind != 2)
+    if (argc - optind != 1)
     {
-        cerr << argv[0] << ": expecting one filename plus a hostname" << endl;
+        cerr << argv[0] << ": expecting index filename" << endl;
         print_usage(argv[0]);
         return 1;
     }
-
     string indexfile = string(argv[optind++]);
-    string hostname = string(argv[optind++]);
 
-    if (!enforcepath.empty())
-        cerr << endl << "WARNING: Enforcing path: " << enforcepath << endl << endl;
-    
+    // Parse host name, port number and enforced path
+    if (verbose) cerr << "reading stdin for hostinfo.txt" << endl;
+    vector<struct host_info> hosts;
+    while (cin.good())
+    {
+        struct host_info hi;
+        cin >> hi.name;
+        if (hi.name.empty())
+            break;
+        cin >> hi.port;
+        if (hi.port < 1024)
+        {
+            cerr << "error: invalid port number: " << hi.port << endl;
+            abort();
+        }
+        cin >> hi.enforcepath;
+        if (hi.enforcepath.empty())
+        {
+            cerr << "error: invalid enforced path: " << hi.enforcepath << endl;
+            abort();
+        }
+        if (verbose)
+            cerr << "host_info " << hosts.size() << ": \"" << hi.name << "\" : " << hi.port << ", \"" << hi.enforcepath << "\"" << endl;
+        hosts.push_back(hi);
+    }
+
+    if (!hosts.size())
+    {
+        cerr << "error: empty host info" << endl;
+        abort();
+    }
+
     /**
      * Initialize shared data structures
      */
     if (verbose) cerr << "Loading index " << indexfile << endl;
     TextCollection *tc = 0; 
     tc = TextCollection::load(indexfile);
-
     // Sanity checks
     if (!tc) {
         cerr << argv[0] << ": could not read index file " << indexfile << endl;
@@ -265,45 +264,33 @@ int main(int argc, char **argv)
     ulong total_occs = 0;
     time_t wctime = time(NULL);
 
-#ifdef PARALLEL_SUPPORT
-    if (parallel != 0)
-    {
-        if (verbose && parallel == 1) 
-            cerr << "Using only one core (default setting, see option -P, --parallel)" << endl;
-        if (verbose && parallel != 1)
-            cerr << "Using " << parallel << " cores." << endl;
-        omp_set_num_threads(parallel);
-    }
-    else
-        if (verbose) cerr << "Using all " << omp_get_max_threads() << " cores available." << endl;
-#pragma omp parallel 
-#endif    
+#pragma omp parallel num_threads(hosts.size())
 {
     EnumerateQuery *query = 0; // Private query instances
 
-#ifdef PARALLEL_SUPPORT
-#pragma omp critical (CONSTRUCT_QUERY)
-#endif    
+#pragma omp critical (CERR_OUTPUT)
 {
+    struct host_info hi = hosts.back();
+    hosts.pop_back();
+    int tnum = omp_get_thread_num();
+    cerr << tnum << ": connecting to host_info " << hosts.size() << ": \"" << hi.name << "\" : " << hi.port << ", \"" << hi.enforcepath << "\"" << endl;
+
     /**
      * Initialize socket
      */
-    if (verbose) cerr << "Init socket to " << hostname << ":" << portno << endl;
-    ClientSocket *cs = new ClientSocket(hostname, portno);
+    if (verbose) cerr << "Init socket to " << hi.name << ":" << hi.port << endl;
+    ClientSocket *cs = new ClientSocket(hi.name, hi.port);
     if (verbose) cerr << "Socket connection succeeded, sending the header \"" << libname(indexfile) << "\"" << endl;
-
     cs->putc('S'); // Start byte
     cs->putstring(libname(indexfile));
     if (verbose) cerr << "Header sent successfully." << endl;
 
-    query = new EnumerateQuery(tc, *outputw, verbose, cs, enforcepath, fmin, maxdepth);
+    query = new EnumerateQuery(tc, *outputw, verbose, cs, hi.enforcepath, fmin, maxdepth);
     if (verbose) cerr << "Align mode: enumerate query with fmin = " << fmin << ", maxdepth = " << maxdepth << endl;
-
     assert(query != 0);
     // Other query settings
     query->setDebug(debug);
-    
-    
+
 } // End of #pragma omp critical (CONSTRUCT_QUERY)
 
     /**
@@ -312,15 +299,10 @@ int main(int argc, char **argv)
     unsigned reported = 0;
     query->enumerate(reported);
 
-#ifdef PARALLEL_SUPPORT
 #pragma omp atomic
         total_found += reported ? 1 : 0;
 #pragma omp atomic
         total_occs += reported;
-#else
-        total_found += reported ? 1 : 0;
-        total_occs += reported;
-#endif
 
     delete query;
 } // end of #pragma omp parallel
