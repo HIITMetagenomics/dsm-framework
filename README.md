@@ -32,7 +32,7 @@ environments; to help you get started, we provide example wrapper-scripts
 for the _SLURM batch job system_.
 
 
-INSTALLATION
+INSTALLATION AND GETTING STARTED
 ----
 
 The current installation is, in short, to write suitable wrapper-scripts 
@@ -48,6 +48,19 @@ Steps (2) and (3) are run in parallel so that (2) is started first. The
 processes in Step (1) and (3) use memory that depends on the dataset sizes.
 Processes from Step (2) require only a small amount of memory.
 
+To get started, please download the following example data (~25 MB). The rest of
+our example commands use these data files.
+
+```
+mkdir test
+cd test
+http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-1.fasta.gz
+http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-2.fasta.gz
+http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-3.fasta.gz
+http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-4.fasta.gz
+http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-5.fasta.gz
+```
+
 
 PREPROCESSING THE DATA
 ----
@@ -62,8 +75,16 @@ Then the FASTA input files must first be preprocessed with builder:
     ./builder -v input.fasta
 ```
 
-The output index will be stored under the filename `input.fasta.fmi`.
-Use e.g. the script distributebuild.sh to build multiple indexes at
+It will output the resulting index under the filename `input.fasta.fmi`.
+You should run `builder` independendly over each of your input datasets.
+The preprocessing can be parallelized by building multiple indexes
+simultaneously, however, these processes might require
+considerable amount of main-memory (depending on the input size).
+
+
+
+
+Use e.g. the script `distributebuild.sh` to build multiple indexes at
 once. The script expects a list of host names as standard
 input. Please see the actual script to setup the correct paths to your
 fasta files etc. - The user will need to modify it to suite their own
