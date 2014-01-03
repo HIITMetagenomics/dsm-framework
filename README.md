@@ -1,24 +1,62 @@
 Distributed String Mining Framework
 ====
 
-This software implements the algorithm published in [1]. 
+This software package implements the algorithm published in [1]. It also includes
+the extensions  proposed in [2].
 
-[1] Niko Välimäki and Simon J. Puglisi: Distributed String Mining for
-High-Throughput Sequencing Data. In Proc. 12th Workshop on Algorithms
-in Bioinformatics (WABI'12), Springer-Verlag, LNCS 7534, pages
+- [1] Niko Välimäki and Simon J. Puglisi: **Distributed String Mining for
+High-Throughput Sequencing Data**. In _Proc. 12th Workshop on Algorithms
+in Bioinformatics (WABI'12)_, Springer-Verlag, LNCS 7534, pages
 441-452, Ljubljana, Slovenia, September 9-14, 2012.
+- [2] Sohan Seth, Niko Välimäki, Samuel Kaski and Antti Honkela: **Exploration 
+and retrieval of whole-metagenome sequencing samples**. 
+Submitted. Available online [arXiv:1308.6074](http://arxiv.org/abs/1308.6074) 
+[q-bio.GN], 2013. 
 
 
-COMPILING
-----
-        
-Run `make clean` and `make` to compile.
-
-
-BUILDING THE INDEXES
+REQUIREMENTS AND COMPILING
 ----
 
-The FASTA input files must first be preprocessed with builder:
+Run `make clean` and `make` to compile. The requirements are
+
+- GNU GCC (g++) environment including some standard libraries (OpenMP).
+- TCP connectivity between the cluster nodes (some range of vacant TCP port numbers).
+- some synchronization when initializing the server-side and 
+client-side programs (i.e. wrapper-scripts).
+
+The first requirement should be fullfilled in typical linux installations. 
+The second requirement depends on the cluster environment (see technical 
+details on this below). The third requirement is crucial and it will 
+require some scripting to be able to run the framework on specific cluster 
+environments; to help you get started, we provide example wrapper-scripts 
+for the _SLURM batch job system_.
+
+
+INSTALLATION
+----
+
+The current installation is, in short, to write suitable wrapper-scripts 
+around the main C/C++ program. We provide example wrapper-scripts for the 
+_SLURM batch job system_. The main computation is divided over
+
+1. preprocessing of each dataset (`builder`),
+2. 64-256 _CPU intensive_ processes (`metaserver`), and
+3. _memory intensive_ processes which use very little CPU (`metaenumerate`).
+
+The preprocessing step (1) is ran separately from (2) and (3). 
+Steps (2) and (3) are run in parallel so that (2) is started first. The 
+processes in Step (1) and (3) use memory that depends on the dataset sizes.
+Processes from Step (2) require only a small amount of memory.
+
+
+PREPROCESSING THE DATA
+----
+
+The input data for the dsm-framework must be in FASTA format. It is
+recommended that you first trim the FASTQ short-read data according
+to sequencing quality and output the trimmed short-reads as a FASTA file.
+
+Then the FASTA input files must first be preprocessed with builder:
 
 ```
     ./builder -v input.fasta
