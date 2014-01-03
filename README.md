@@ -52,13 +52,13 @@ To get started, please download the following example data (~25 MB). The rest of
 our example commands use these data files.
 
 ```
-mkdir test
-cd test
-http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-1.fasta.gz
-http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-2.fasta.gz
-http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-3.fasta.gz
-http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-4.fasta.gz
-http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-5.fasta.gz
+mkdir example
+cd example
+wget http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-1.fasta.gz
+wget http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-2.fasta.gz
+wget http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-3.fasta.gz
+wget http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-4.fasta.gz
+wget http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-5.fasta.gz
 ```
 
 
