@@ -19,7 +19,7 @@ REQUIREMENTS AND COMPILING
 
 Run `make clean` and `make` to compile. The requirements are
 
-- GNU GCC (g++) environment including some standard libraries (OpenMP).
+- GNU GCC (g++ 4.3) environment including the OpenMP library.
 - TCP connectivity between the cluster nodes (some range of vacant TCP port numbers).
 - some synchronization when initializing the server-side and 
 client-side programs (i.e. wrapper-scripts).
