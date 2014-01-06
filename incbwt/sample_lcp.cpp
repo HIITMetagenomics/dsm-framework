@@ -15,7 +15,7 @@ main(int argc, char** argv)
   std::cout << "LCP sampler" << std::endl;
   if(argc < 3)
   {
-    std::cout << "Usage: sample_plcp base_name sample_rate" << std::endl;
+    std::cout << "Usage: sample_lcp base_name sample_rate" << std::endl;
     return 1;
   }
 

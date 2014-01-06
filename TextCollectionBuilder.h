@@ -27,10 +27,10 @@
 #include <cstring> // Defines std::strlen
 
 // Default samplerate for suffix array samples
-#define TEXTCOLLECTION_DEFAULT_SAMPLERATE 16
+#define TEXTCOLLECTION_DEFAULT_SAMPLERATE 124
 
 // Default input length, used to calculate the buffer size.
-#define TEXTCOLLECTION_DEFAULT_INPUT_LENGTH (950 * 1024 * 1024)
+#define TEXTCOLLECTION_DEFAULT_INPUT_LENGTH (5lu * 1024 * 1024 * 1024)
 
 
 struct TCBuilderRep; // Pimpl

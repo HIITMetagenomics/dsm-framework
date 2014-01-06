@@ -101,14 +101,14 @@ ssize_t ClientSocket::readnonblocking(int fd, char *vptr, size_t n)
 void ClientSocket::flushBuffer()
 {
     /*cerr << "BUFFER UPDATE!!!!" << endl << "\"";
-    for (int i = 0; i < n; ++i)
+    for (unsigned i = 0; i < n; ++i)
         if (buffer[i] < 20)
             std::cerr << (int)buffer[i];
         else
             std::cerr << buffer[i];
             cerr << "\"" << endl;*/
 
-    if (writen(sockfd, buffer, n) != (int)n)
+    if (writen(sockfd, buffer, n) != n)
         error("ERROR writing the output");
 
     n = 0;

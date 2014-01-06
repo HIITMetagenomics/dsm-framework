@@ -14,16 +14,27 @@ namespace CSA
 
 
 #ifdef MASSIVE_DATA_RLCSA
+
 typedef unsigned long usint;
 typedef signed long   sint;
+
+inline usint popcount(usint field)
+{
+  return __builtin_popcountl(field);
+}
+
 #else
+
 typedef unsigned int  usint;
 typedef signed int    sint;
+
+inline usint popcount(usint field)
+{
+  return __builtin_popcount(field);
+}
+
 #endif
 
-#ifndef uint
-typedef unsigned int uint;
-#endif
 
 #ifndef uchar
 typedef unsigned char uchar;
@@ -39,12 +50,12 @@ inline usint length(usint n)
   return b;
 }
 
-inline bool isEmpty(const pair_type& data)
+inline bool isEmpty(const pair_type data)
 {
   return (data.first > data.second);
 }
 
-inline usint length(const pair_type& data)
+inline usint length(const pair_type data)
 {
   return data.second + 1 - data.first;
 }

@@ -39,15 +39,15 @@ main(int argc, char** argv)
   std::cout << std::endl;
   RLCSA rlcsa(base_name);
 
-  std::clock_t start = std::clock();
-  RLEVector* plcp = rlcsa.buildPLCP(block_size);
+  clock_t start = clock();
+  PLCPVector* plcp = rlcsa.buildPLCP(block_size);
   plcp->writeTo(plcp_file);
-  std::clock_t stop = std::clock();
+  clock_t stop = clock();
 
   double time = ((stop - start) / (double)CLOCKS_PER_SEC);
   double megabytes = rlcsa.getSize() / (double)MEGABYTE;
   double size = plcp->reportSize() / (double)MEGABYTE;
-  RLEVector::Iterator iter(*plcp);
+  PLCPVector::Iterator iter(*plcp);
   usint runs = iter.countRuns();
 
   std::cout << megabytes << " megabytes in " << time << " seconds (" << (megabytes / time) << " MB/s)" << std::endl;

@@ -13,7 +13,7 @@ RLEVector::RLEVector(std::ifstream& file) :
 {
 }
 
-RLEVector::RLEVector(RLEEncoder& encoder, usint universe_size) :
+RLEVector::RLEVector(Encoder& encoder, usint universe_size) :
   BitVector(encoder, universe_size)
 {
 }
@@ -119,6 +119,37 @@ RLEVector::Iterator::selectNext()
 }
 
 pair_type
+RLEVector::Iterator::valueBefore(usint value)
+{
+  const RLEVector& par = (const RLEVector&)(this->parent);
+
+  if(value >= par.size) { return pair_type(par.size, par.items); }
+
+  this->getSample(this->sampleForValue(value));
+  if(this->val > value) { return pair_type(par.size, par.items); }
+  this->run = 0;
+
+  while(this->cur < this->block_items && this->val < value)
+  {
+    usint temp = this->buffer.readDeltaCode(value - this->val);
+    if(temp == 0) { break; }
+    this->val += temp;
+
+    temp = this->buffer.readDeltaCode();
+    this->cur += temp;
+    this->val += temp - 1;
+  }
+  if(this->val > value)
+  {
+    this->run = this->val - value;
+    this->val = value;
+    this->cur -= this->run;
+  }
+
+  return pair_type(this->val, this->sample.first + this->cur);
+}
+
+pair_type
 RLEVector::Iterator::valueAfter(usint value)
 {
   const RLEVector& par = (const RLEVector&)(this->parent);
@@ -216,15 +247,49 @@ RLEVector::Iterator::countRuns()
   return runs;
 }
 
+void
+RLEVector::Iterator::valueLoop(usint value)
+{
+  this->getSample(this->sampleForValue(value));
+  this->run = 0;
+
+  if(this->val >= value) { return; }
+  while(this->cur < this->block_items)
+  {
+    this->val += this->buffer.readDeltaCode();
+    this->cur++;
+    this->run = this->buffer.readDeltaCode() - 1;
+    if(this->val >= value) { break; }
+
+    this->cur += this->run;
+    this->val += this->run;
+    if(this->val >= value)
+    {
+      this->run = this->val - value;
+      this->val = value;
+      this->cur -= this->run;
+      break;
+    }
+    this->run = 0;
+  }
+}
+
 //--------------------------------------------------------------------------
 
 RLEEncoder::RLEEncoder(usint block_bytes, usint superblock_size) :
-  VectorEncoder(block_bytes, superblock_size)
+  VectorEncoder(block_bytes, superblock_size),
+  run(EMPTY_PAIR)
 {
 }
 
 RLEEncoder::~RLEEncoder()
 {
+}
+
+void
+RLEEncoder::setBit(usint value)
+{
+  this->setRun(value, 1);
 }
 
 void
@@ -279,6 +344,37 @@ RLEEncoder::setRun(usint start, usint len)
   {
     this->RLEncode(1, len - 1);
   }
+}
+
+void
+RLEEncoder::addBit(usint value)
+{
+  this->addRun(value, 1);
+}
+
+void
+RLEEncoder::addRun(usint start, usint len)
+{
+  if(this->run.second == 0)
+  {
+    this->run = pair_type(start, len);
+  }
+  else if(start == this->run.first + this->run.second)
+  {
+    this->run.second += len;
+  }
+  else
+  {
+    this->setRun(this->run.first, this->run.second);
+    this->run = pair_type(start, len);
+  }
+}
+
+void
+RLEEncoder::flush()
+{
+  this->setRun(this->run.first, this->run.second);
+  this->run.second = 0;
 }
 
 

@@ -1,10 +1,12 @@
 #include "TrieReader.h"
+
 #include <unordered_set>
 #include <utility>
 #include <vector>
 #include <map>
 #include <sstream>
 #include <iostream>
+#include <cmath>
 #include <string>
 #include <algorithm>
 #include <ctime>
@@ -37,8 +39,13 @@ void print_help(char const *name)
          << endl
          << "  <stdin>       A list of expected library names." << endl
          << endl 
-         << "Options:" << endl
+         << "Mandatory option:" << endl
+         << "-E,--emax <double>      Maximum entropy to output." << endl  << endl
+      //         << "--discriminative <int>  Discriminative mining. " << endl << endl
+         << "Other options:" << endl
          << "-p,--port <p>     Listen to port number p." << endl
+         << "-P,--pmin <int>   p_min value." << endl
+         << "-e,--emin <double> Minimum entropy to output (default 0.0)" << endl
          << "-F,--topfreq <p>  Print the top-p output frequencies." << endl
          << "-T,--toptimes <p> Print the top-p latencies." << endl
          << "-v,--verbose      Print progress information." << endl
@@ -106,10 +113,18 @@ void printatr(vector<TrieReader *> tr)
 bool debug = false;
 bool outputall = false; // For debugging only!
 bool verbose = false;
+int positivesets = -1;
 int toptimes = 0;
 int topfreq = 0;
 unsigned mindepth = 0;
-unsigned pmin=2;
+
+bool discriminative = false;
+int fisheralt = 0;
+unsigned pmin = 2;
+double emin = 0.0;
+double emax = -1.0;
+double smallest_entropy = 1000.0;
+double largest_entropy = -1000.0;
 
 time_t wctime = time(NULL);
 ulong tnbin_discard = 0;
@@ -121,6 +136,8 @@ vector<ulong> freqhistogram;
 int dnatoi[256];
 char itodna[MAX_CHILDREN];
 string path;
+double *posFreqVector = 0, *negFreqVector = 0;
+//unsigned haltSent = 0;
 
 inline bool moreChildren(vector<readerset> const &children)
 {
@@ -136,6 +153,19 @@ inline bool moreChildren(vector<readerset> const &children)
  */
 bool readChildren(readerset const &atr, vector<readerset> &children)
 {
+/*        if (debug)
+        {
+            cerr << "child table: ";
+            for (map<char,vector<TrieReader *> >::iterator it  = children.begin(); it != children.end(); ++it)
+            {
+                cerr << it->first << "[";
+                for (vector<TrieReader *>::iterator jt = it->second.begin(); jt != it->second.end(); ++jt)
+                    cerr << " " << (*jt)->getId();
+                cerr << "]";
+            }
+            cerr << endl;
+            }*/
+
     for (readerset::const_iterator it = atr.begin(); it != atr.end(); ++it)
     {
         TrieReader *tr = allreaders[*it];
@@ -182,6 +212,9 @@ void traverseOne(unsigned reader)
     // Note: Even if output == false, we need to iterate through readOccs()
     TrieReader *tr = allreaders[reader];
     tr->readOccs();
+
+/* FIXME this should not occur... if (path.size() <= 6)
+   tr->checkR(); // Checksum is written for nodes at levels <7.*/
 
     tr->readClose();  // Closing parenthesis is read & checked
     ++total_paths; // No output, pmin > 1 here
@@ -266,19 +299,39 @@ void traverse(readerset const &treaders)
             cerr << ">" << endl;
         }
         cerr << "current path is " << path
-             << " (" << treaders.size() 
-             << " active, " << total_output 
-             << " reported, " << total_occs 
-             << " occs, " << std::difftime(time(NULL), wctime) << " s, " 
-             << std::difftime(time(NULL), wctime) / 3600 << " hrs)" << endl;
+//        for (vector<char>::const_iterator pathit = path.begin(); pathit != path.end(); ++pathit)
+//            cerr << *pathit;
+         << " (" << treaders.size() << " active, " << total_output << " reported, " << total_occs << " occs, " << std::difftime(time(NULL), wctime) << " s, " 
+             << std::difftime(time(NULL), wctime) / 3600 << " hrs), entropies [" << smallest_entropy << ", " << largest_entropy << "], tnbin_discard = " << tnbin_discard << endl;
     }
 
     if (treaders.size() == 1 && pmin > 1)
     {
         readerset::const_iterator it = treaders.begin();
-        traverseOne(*it);
+//        if (pmin > 1)
+//        {
+            //ulong tmp = total_paths;
+            //cerr << "traverseOne called! sending msg to depth = " << path.size() << endl;
+            //if (!haltSent)
+            //    allreaders[*it]->sendHalt(path.size());
+            traverseOne(*it);
+            //cerr << total_paths-tmp << " paths returned" << endl;
+//        }
+//        else
+//        {
+//            traverseOneWithOutput(*it); // FIXME does not check the value of 'discriminative'
+//                                        // FIXME does not output pvalues or entropies
+//        }
         return;
     }
+    /*else if (treaders.size() < pmin && haltSent == 0)
+    {
+        haltSent = path.size();
+        //cerr << "Sending halt to " << treaders.size() << " treaders." << endl;
+        for (readerset::const_iterator it = treaders.begin(); it != treaders.end(); ++it)
+            allreaders[*it]->sendHalt(path.size());
+            }*/
+
 
     // Iterate and collect children
     readerset atr = treaders;
@@ -300,6 +353,9 @@ void traverse(readerset const &treaders)
         children[i].clear(); // Close the subtree.
     } 
 
+//    if (haltSent == path.size())
+//        haltSent = 0;
+
     // No output for empty path
     if (path.empty()) return;
 
@@ -314,11 +370,31 @@ void traverse(readerset const &treaders)
     // Note: Output only if path is not in every set
     // Note: Even if output == false, we need to iterate through readOccs()
     char leftChar = 0;
+
+    int pfv = 0, nfv = 0;            // used to compute discriminative mining
+    ulong sumN = allreaders.size();  // used to compute \sum_j n_j + d*1
+    double sumNlogN = 0;             // used to compute \sum_i (n_i+1) log (n_i+1)
+    if (discriminative)
+    {
+        for (int j = 0; j < positivesets; ++j)
+            posFreqVector[j] = 0;
+        for (unsigned j = 0; j < allreaders.size() - positivesets; ++j)
+            negFreqVector[j] = 0;
+    }
     for (readerset::const_iterator it = treaders.begin(); it != treaders.end(); ++it)
     {
         TrieReader *tr = allreaders[*it];
         ulong freq = tr->readOccs();
-        /* process frequencies here */
+        if (discriminative)
+        {
+            if (tr->isPositive())
+                posFreqVector[pfv++] = freq;
+            else
+                negFreqVector[nfv++] = freq;
+        }
+        // Update entropy
+        sumN += freq;
+        sumNlogN += (double)(freq+1) * log(freq+1)/log(2);
 
         if (path.size() <= 6)
             tr->checkR(); // Checksum is written for nodes at levels <7.
@@ -328,8 +404,19 @@ void traverse(readerset const &treaders)
         else if (leftChar != lChar)
             leftChar = 'N';
     }
+    double entropy = log(sumN)/log(2) - sumNlogN/(double)sumN;
+    if (smallest_entropy > entropy)
+        smallest_entropy = entropy;
+    if (largest_entropy < entropy)
+        largest_entropy = entropy;
 
     assert(leftChar != 0);
+    assert(!discriminative || pfv <= positivesets);
+    assert(!discriminative || nfv <= allreaders.size() - positivesets);
+    if (discriminative && pfv == 0)
+        posFreqVector[0] = 1;  // All zero values do not work with TNBin
+    if (discriminative && nfv == 0)
+        negFreqVector[0] = 1;  // All zero values do not work with TNBin
 
     /**
      * Test for output conditions
@@ -338,14 +425,62 @@ void traverse(readerset const &treaders)
     if (path.size() < mindepth)
         output = false;
     //if (treaders.size() == allreaders.size())
-    //    output = false; // pmax disabled
+    //    output = false; // pmax disabled FIXME
     if (treaders.size() < pmin)
+        output = false;
+    if (emax > 0 && (entropy < emin || entropy > emax))
         output = false;
 
     if (numberOfChildren == 1 && treaders.size() == atr.size())
         output = false; // not right branching
     if (leftChar == 'A' || leftChar == 'C' || leftChar == 'G' || leftChar == 'T')
         output = false; // not left branching
+
+    double pvalue = 0;
+    // Output condition for discriminative mining
+    if (output && discriminative)
+    {
+        /** 
+         * Using Fisher test with
+         * a = # of positive samples with (>x occurrences of) string
+         * b = # of positive samples without (>x occurrences of) string
+         * c = # of negative samples with (>x occurrences of) string
+         * d = # of negative samples without (>x occurrences of) string 
+         *
+        int a = 0;
+        for (readerset::const_iterator it = treaders.begin(); it != treaders.end(); ++it)
+            if (allreaders[*it]->isPositive())
+                ++a;
+        int b = positivesets - a;
+        int c = treaders.size() - a;
+        int d = allreaders.size() - positivesets - c;
+
+        pvalue = fisher_test(a, b, c, d, fisheralt);
+        ** End of Fisher test
+        **/
+
+        /**
+         * Using TNBin3 test
+         *
+         * Assert: posFreqVector and negFreqVector are initialized
+         **
+        pvalue = tnbin_test(positivesets, posFreqVector, allreaders.size() - positivesets, negFreqVector);
+        if (pvalue < PTHRESHOLD)
+        {
+            tnbin_discard ++;
+            output = false;
+	    }*/
+
+        // DEBUG OUTPUT
+        /*
+        for (int j = 0; j < positivesets; ++j)
+            printf("%.0f,", posFreqVector[j]);
+        printf(" ");
+        for (unsigned j = 0; j < allreaders.size() - positivesets; ++j)
+            printf("%.0f,", negFreqVector[j]);
+        printf("\n");
+        output = false;*/
+    }
     
     ++total_paths;
     if (output) 
@@ -353,6 +488,10 @@ void traverse(readerset const &treaders)
         ++total_output;
         ++freqhistogram[treaders.size() - 1];
         printf("%s", path.c_str());
+        if (discriminative)
+            printf(" %f", pvalue);
+        else
+            printf(" %f", entropy);
         
         for (readerset::const_iterator it = treaders.begin(); it != treaders.end(); ++it)
         {
@@ -395,9 +534,12 @@ int main(int argc, char **argv)
 
     static struct option long_options[] =
         {
-            {"port",           required_argument, 0, 'p'},
+            {"discriminative", required_argument, 0, long_opt_discriminative},
             {"pmin",           required_argument, 0, 'P'},
+            {"port",           required_argument, 0, 'p'},
             {"mindepth",       required_argument, 0, 'm'},
+            {"emin",           required_argument, 0, 'e'},
+            {"emax",           required_argument, 0, 'E'},
             {"topfreq",        required_argument, 0, 'F'},
             {"toptimes",       required_argument, 0, 'T'},
             {"verbose",        no_argument,       0, 'v'},
@@ -408,11 +550,17 @@ int main(int argc, char **argv)
         };
     int option_index = 0;
     int c;
-    while ((c = getopt_long(argc, argv, "p:m:F:T:vhA",
+    while ((c = getopt_long(argc, argv, "P:p:m:e:E:F:T:vhA",
                                  long_options, &option_index)) != -1) 
     {
         switch(c) 
         {
+        case long_opt_discriminative:
+	  cerr << "error: option --discriminative is not supported!" << endl;
+	  return 1;
+            discriminative = true; 
+            fisheralt = atoi_min(optarg, -1, "--discriminative", argv[0]);
+            break;
         case 'P':
             pmin = atoi_min(optarg, 1, "-P, --pmin", argv[0]) ; break;
         case 'p':
@@ -421,6 +569,10 @@ int main(int argc, char **argv)
             mindepth = atoi_min(optarg, 1, "-m, --mindepth", argv[0]);
             cerr << "using min depth = " << mindepth << endl; 
             break;
+        case 'e':
+            emin = atof_min(optarg, 0, "-e, --emin", argv[0]) ; break;
+        case 'E':
+            emax = atof_min(optarg, 0, "-E, --emax", argv[0]) ; break;
         case 'F':
             topfreq = atoi_min(optarg, 1, "--recursion", argv[0]) ; break;
         case 'T':
@@ -442,9 +594,31 @@ int main(int argc, char **argv)
         }
     }
 
+    if ((!discriminative && emax < 0) || (discriminative && emax > 0))
+    {
+        cerr << argv[0] << ": error: expecting parameter --emax" << endl;
+        return 1;
+    }
+
+
+    if (emin > emax && !discriminative)
+    {
+        cerr << argv[0] << ": error: -e <double> must be smaller than or equal to -E <double>" << endl;
+        return 1;
+    }
+
+    // Parse filenames
+/*    if (argc - optind != 1)
+    {
+        cerr << argv[0] << ": expecting one filename" << endl;
+        print_usage(argv[0]);
+        return 1;
+        }*/
+
     /**
      * Read list of input files
      */
+    positivesets = 0; // Number of 'positive' sets
     string line;
     map<string,pair<int,bool> > libtoid;
     cerr << "Expected inputs:";
@@ -458,8 +632,28 @@ int main(int argc, char **argv)
         }
         int id = libtoid.size();
         string name = line.substr(0, line.find_first_of('\t'));
+        bool positive = false;
+        if (discriminative)
+        {
+            // Split the line at tab
+            string::size_type pos = line.find_first_of('\t');
+            if (pos == string::npos 
+                || (line[pos+1] != '0' && line[pos+1] != '1'))
+            {
+                cerr << endl << "Invalid input file for discriminative mining: expecting <run> <boolean> pairs as input" << endl;
+                return 1;
+            }
+            name = line.substr(0, pos);
+            if (line[pos+1] == '1')
+            {
+                positive = true;
+                positivesets ++;
+            }
+        }
         if (verbose && id < 100)
             cerr << " " << id << " : " << name;
+        if (verbose && discriminative && id < 100)
+            cerr << " (" << positive << ")";
         if (verbose && id == 100)
             cerr << " ...";
 
@@ -469,13 +663,26 @@ int main(int argc, char **argv)
             return 1;
         }
 
-        libtoid[name] = make_pair(id,0);
+        libtoid[name] = make_pair(id,positive);
     }
     cerr << endl;
 
     if (verbose)
     {
         cerr << "Reading " << libtoid.size() << " input pipes from port " << portno << endl;
+        if (discriminative)
+            cerr << "Expecting " << positivesets << " positive feeds." << endl
+                 << " using pthreshold = " << PTHRESHOLD << " and alternative = " << fisheralt << endl;
+        else
+            cerr << "Using emin = " << emin << " and emax = " << emax << endl;
+    }
+        
+    posFreqVector = 0;
+    negFreqVector = 0;
+    if (discriminative)
+    {
+        posFreqVector = new double[positivesets];
+        negFreqVector = new double[libtoid.size() - positivesets];
     }
 
     if ( libtoid.size() > MAX_READERS )
@@ -539,23 +746,84 @@ int main(int argc, char **argv)
     wctime = time(NULL);
     path.reserve(1024*1024);
 
+
+
     readerset rb;
     for (size_t i = 0; i < allreaders.size(); ++i)
         rb.insert(i); // Set all first allreaders.size() bits to 1
     traverse(rb);
 
+    /**
+     * Init tree
+     */
+    /*    TrieNode *root = new TrieNode(allreaders);
+    root->updateReaders();
+    TrieNode *cur = root->firstChild();*/
+
+    // Loop while the root node has children
+/*    while (!cur->isRoot() || cur->hasChildren())
+    {  
+        if (debug || (cur->getLevel() <= 5 && verbose))
+        {
+            cerr << "Current node has path: " << cur->path() << endl;
+        }
+
+        // iterate and update each active reader at this node
+        vector<TrieReader *> areaders = cur->getActiveReaders();
+        for (vector<TrieReader *>::iterator it = allreaders.begin(); it != allreaders.end(); ++it)
+        {
+            TrieReader *tr = *it;
+            if (tr->hasChild())
+            {
+                char c = tr->readChild();
+                if (debug) cerr << "moving reader to child " << c << endl; 
+                (cur->getChild(c))->addReader(tr);
+                cur->removeReader(tr);
+            }
+        }
+
+        if (cur->hasChildren())
+        {
+            // Traverse all the children first
+            cur = cur->firstChild();
+        }
+        else
+        {
+            // No children, we output results in post-order and close the node
+            if (debug)
+                cerr << "outputting results for node at path: " << cur->path() << endl;
+            
+            vector<TrieReader *> areaders = cur->getActiveReaders();
+
+            char c = cur->getSymbol();
+            cur = cur->getParent();
+            cur->removeChild(c);
+        }
+    }
+
+    if (root->size() != 1)
+        cerr << "WARNING:  Tree size was " << root->size() << " at exit." << endl;
+
+    // clean up
+    delete root; root = 0;*/
     for (vector<TrieReader *>::iterator it = allreaders.begin(); it != allreaders.end(); ++it)
     {
+        if (distance(allreaders.begin(), it) != (*it)->getId())
+            cerr << "Warning: ID was changed for " << (*it)->getId() << " vs " << distance(allreaders.begin(), it) << endl;
         (*it)->checkEof();
         delete *it;
     }
+
+    delete [] posFreqVector;
+    delete [] negFreqVector;
 
     if (verbose)
     {	
         cerr << "Number of paths: " << total_paths << endl
              << "Number of reported paths: " << total_output << endl
              << "Number of reported occs: " << total_occs << endl
-             << "Number of TNBin discarded paths: " << tnbin_discard << endl;
+             << "Number of TNBin discarded paths: " << tnbin_discard << endl
+             << "Smallest and largest entropies encountered: " <<  smallest_entropy << " and " << largest_entropy << endl;        
         cerr << "Wall-clock time: " << std::difftime(time(NULL), wctime) << " seconds (" 
              << std::difftime(time(NULL), wctime) / 3600 << " hours)" << endl;
     }

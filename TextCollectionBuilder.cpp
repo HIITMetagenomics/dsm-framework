@@ -1,7 +1,7 @@
 #include "rlcsa_builder.h"
 #include "TextCollectionBuilder.h"
 #include "FMIndex.h"
-#include "rlcsa_wrapper.h"
+//#include "rlcsa_wrapper.h"
 
 #include <vector>
 using std::vector;
@@ -119,15 +119,19 @@ TextCollection * TextCollectionBuilder::InitTextCollection(bool storePlainText, 
         }
         else
         {
+            cerr << "calling rlcsa::getbwt().." << endl;
             bwt = (uchar *)p_->sa->getBWT(length);
+            cerr << "rlcsa::getbwt() successful!" << endl;
             delete p_->sa;
             p_->sa = 0;
 
             assert(length == p_->n);
         }
 
+        cerr << "calling fmindex constructor.." << endl;
         result = new FMIndex(bwt, (ulong)length, p_->samplerate, p_->numberOfTexts, p_->maxTextLength, 
                              p_->numberOfSamples, p_->name, storePlainText, color, rotationLength);
+        cerr << "fmindex constructor successful.." << endl;
         break;
     }
     case(TextCollection::TYPE_RLCSA):

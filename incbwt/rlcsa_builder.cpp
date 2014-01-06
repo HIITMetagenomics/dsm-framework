@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <cstdlib>
-#include <cstring> // memcpy()
+#include <cstring>
 #include <iostream>
 
 #include "rlcsa_builder.h"
@@ -8,7 +8,6 @@
 
 #ifdef MULTITHREAD_SUPPORT
 #include <omp.h>
-#include <mcstl.h>
 #endif
 
 
@@ -42,18 +41,19 @@ RLCSABuilder::insertSequence(char* sequence, usint length, bool delete_sequence)
     return;
   }
 
+  #ifdef MULTITHREAD_SUPPORT
+  omp_set_num_threads(this->threads);
+  #endif
+
   if(this->buffer == 0)
   {
-    double start = readTimer();
-    RLCSA* temp = new RLCSA((uchar*)sequence, length, this->block_size, this->sample_rate, false, false);
-    this->build_time += readTimer() - start;
-    this->addRLCSA(temp, (uchar*)sequence, length + 1, delete_sequence);
+    this->addLongSequence((uchar*)sequence, length, delete_sequence);
     return;
   }
 
   if(this->buffer_size - this->chars > length)
   {
-    std::memcpy(this->buffer + this->chars, sequence, length);
+    memcpy(this->buffer + this->chars, sequence, length);
     if(delete_sequence) { delete[] sequence; }
     this->chars += length;
     this->buffer[this->chars] = 0;
@@ -61,21 +61,14 @@ RLCSABuilder::insertSequence(char* sequence, usint length, bool delete_sequence)
   }
   else
   {
-    if(this->chars > 0)
-    {
-      this->flush();
-      this->buffer = new uchar[this->buffer_size];
-    }
+    if(this->chars > 0) { this->flush(); }
     if(length >= this->buffer_size - 1)
     {
-      double start = readTimer();
-      RLCSA* temp = new RLCSA((uchar*)sequence, length, this->block_size, this->sample_rate, false, false);
-      this->build_time += readTimer() - start;
-      this->addRLCSA(temp, (uchar*)sequence, length + 1, delete_sequence);
+      this->addLongSequence((uchar*)sequence, length, delete_sequence);
     }
     else
     {
-      std::memcpy(this->buffer + this->chars, sequence, length);
+      memcpy(this->buffer + this->chars, sequence, length);
       if(delete_sequence) { delete[] sequence; }
       this->chars += length;
       this->buffer[this->chars] = 0;
@@ -89,11 +82,11 @@ RLCSABuilder::insertFromFile(const std::string& base_name)
 {
   if(!this->ok) { return; }
 
-  if(this->buffer != 0 && this->chars > 0)
-  {
-    this->flush();
-    this->buffer = new uchar[this->buffer_size];
-  }
+  #ifdef MULTITHREAD_SUPPORT
+  omp_set_num_threads(this->threads);
+  #endif
+
+  this->flush();
 
   std::ifstream input(base_name.c_str(), std::ios_base::binary);
   if(!input) { return; }
@@ -105,6 +98,58 @@ RLCSABuilder::insertFromFile(const std::string& base_name)
 
   this->addRLCSA(increment, data, data_size, true);
 }
+
+void
+RLCSABuilder::insertCollection(const std::string& base_name)
+{
+  if(!this->ok) { return; }
+
+  #ifdef MULTITHREAD_SUPPORT
+  omp_set_num_threads(this->threads);
+  #endif
+
+  this->flush();
+
+  std::ifstream input(base_name.c_str(), std::ios_base::binary);
+  if(!input) { return; }
+
+  usint data_size = fileSize(input);
+  uchar* data = new uchar[data_size];
+  input.read((char*)data, data_size);
+  input.close();
+
+  if(this->index == 0)
+  {
+    this->addCollection(data, data_size, true);
+    return;
+  }
+
+  std::vector<usint> end_markers;
+  usint* ranks = this->getRanks(data, data_size, end_markers);
+
+  double start = readTimer();
+  #pragma omp parallel for schedule(static)
+  for(usint i = 0; i < data_size; i++) { ranks[i] += end_markers.size() + 1 + data[i]; }
+  for(usint i = 0; i < end_markers.size(); i++)
+  {
+    ranks[end_markers[i]] = this->index->getNumberOfSequences() + i;
+  }
+  RLCSA* increment = new RLCSA(data, ranks, data_size, this->block_size, this->sample_rate, this->threads, false);
+  #pragma omp parallel for schedule(static)
+  for(usint i = 0; i < data_size; i++) { ranks[i] -= data[i]; }
+  delete[] data;
+  double mark = readTimer();
+  this->build_time += mark - start;
+
+  parallelSort(ranks, ranks + data_size);
+  #pragma omp parallel for schedule(static)
+  for(usint i = end_markers.size(); i < data_size; i++) { ranks[i] += i - end_markers.size(); }
+  this->sort_time += readTimer() - mark;
+
+  this->mergeRLCSA(increment, ranks, data_size);
+}
+
+//--------------------------------------------------------------------------
 
 RLCSA*
 RLCSABuilder::getRLCSA()
@@ -120,11 +165,7 @@ RLCSABuilder::getRLCSA()
 char*
 RLCSABuilder::getBWT(usint& length)
 {
-  if(this->chars > 0)
-  {
-    this->flush();
-    if(this->buffer_size > 0) { this->buffer = new uchar[this->buffer_size]; }
-  }
+  this->flush();
 
   if(this->index == 0 || !(this->ok))
   {
@@ -133,6 +174,7 @@ RLCSABuilder::getBWT(usint& length)
   }
 
   length = this->index->getSize() + this->index->getNumberOfSequences();
+  std::cerr << "rlcsa index size is " << length << std::endl;
   return (char*)(this->index->readBWT());
 }
 
@@ -171,82 +213,15 @@ RLCSABuilder::getMergeTime()
 void
 RLCSABuilder::flush()
 {
+  if(this->buffer == 0 || this->chars == 0) { return; }
+
   double start = readTimer();
-  RLCSA* temp = new RLCSA(this->buffer, this->chars, this->block_size, this->sample_rate, true, (this->index == 0));
+  RLCSA* temp = new RLCSA(this->buffer, this->chars, this->block_size, this->sample_rate, this->threads, (this->index == 0));
   this->build_time += readTimer() - start;
   this->addRLCSA(temp, this->buffer, this->chars, (this->index != 0));
-  this->buffer = 0; this->chars = 0;
-}
 
-void
-RLCSABuilder::addRLCSA(RLCSA* increment, uchar* sequence, usint length, bool delete_sequence)
-{
-  if(this->index != 0)
-  {
-    double start = readTimer();
-
-    usint sequences = increment->getNumberOfSequences();
-    usint* end_markers = new usint[sequences];
-    usint curr = 0;
-    for(usint i = 0; i < length - 1; i++)
-    {
-      if(sequence[i] == 0) { end_markers[curr++] = i; }
-    }
-    end_markers[sequences - 1] = length - 1;
-
-    usint* positions = new usint[length]; usint begin;
-    #ifdef MULTITHREAD_SUPPORT
-    usint chunk = std::max((usint)1, sequences / (8 * this->threads));
-    omp_set_num_threads(this->threads);
-    #pragma omp parallel private(begin)
-    {
-      #pragma omp for schedule(dynamic, chunk)
-      for(sint i = 0; i < (sint)sequences; i++)
-      {
-        if(i > 0) { begin = end_markers[i - 1] + 1; } else { begin = 0; }
-        this->index->reportPositions(sequence + begin, end_markers[i] - begin, positions + begin);
-      }
-    }
-    #else
-    for(sint i = 0; i < (sint)sequences; i++)
-    {
-      if(i > 0) { begin = end_markers[i - 1] + 1; } else { begin = 0; }
-      this->index->reportPositions(sequence + begin, end_markers[i] - begin, positions + begin);
-    }
-    #endif
-    delete[] end_markers;
-    if(delete_sequence) { delete[] sequence; }
-
-    double mark = readTimer();
-    this->search_time += mark - start;
-
-    #ifdef MULTITHREAD_SUPPORT
-    mcstl::SETTINGS::num_threads = this->threads;
-    #endif
-    std::sort(positions, positions + length);
-    for(usint i = 0; i < length; i++)
-    {
-      positions[i] += i + 1;  // +1 because the insertion will be after positions[i]
-    }
-
-    double sort = readTimer();
-    this->sort_time += sort - mark;
-
-    RLCSA* merged = new RLCSA(*(this->index), *increment, positions, this->block_size, this->threads);
-    delete[] positions;
-    delete this->index;
-    delete increment;
-    this->index = merged;
-
-    this->merge_time += readTimer() - sort;  
-  }
-  else
-  {
-    if(delete_sequence) { delete[] sequence; }
-    this->index = increment;
-  }
-
-  this->ok &= this->index->isOk();
+  this->chars = 0;
+  this->buffer = new uchar[this->buffer_size];
 }
 
 void
@@ -256,6 +231,7 @@ RLCSABuilder::reset()
 
   if(this->buffer_size != 0)
   {
+    delete[] this->buffer;
     this->buffer = new uchar[this->buffer_size];
   }
   this->chars = 0;
@@ -263,5 +239,104 @@ RLCSABuilder::reset()
   this->ok = true;
 }
 
+//--------------------------------------------------------------------------
+
+void
+RLCSABuilder::addRLCSA(RLCSA* increment, uchar* sequence, usint length, bool delete_sequence)
+{
+  if(this->index == 0)
+  {
+    if(delete_sequence) { delete[] sequence; }
+    this->setRLCSA(increment);
+    return;
+  }
+
+  std::vector<usint> end_markers;
+  usint* ranks = this->getRanks(sequence, length, end_markers);
+  if(delete_sequence) { delete[] sequence; }
+
+  double mark = readTimer();
+  parallelSort(ranks, ranks + length);
+  #pragma omp parallel for schedule(static)
+  for(usint i = 0; i < length; i++) { ranks[i] += i + 1; }
+  this->sort_time += readTimer() - mark;
+
+  this->mergeRLCSA(increment, ranks, length);
+}
+
+void
+RLCSABuilder::setRLCSA(RLCSA* new_index)
+{
+  this->index = new_index;
+  this->ok &= this->index->isOk();
+}
+
+void
+RLCSABuilder::mergeRLCSA(RLCSA* increment, usint* ranks, usint length)
+{
+  double mark = readTimer();
+
+  RLCSA* merged = new RLCSA(*(this->index), *increment, ranks, this->block_size, this->threads);
+  delete[] ranks;
+  delete this->index;
+  delete increment;
+  this->index = merged;
+
+  this->merge_time += readTimer() - mark;
+
+  this->ok &= this->index->isOk();
+}
+
+//--------------------------------------------------------------------------
+
+usint*
+RLCSABuilder::getRanks(uchar* sequence, usint length, std::vector<usint>& end_markers)
+{
+  double start = readTimer();
+
+  usint sequences = 0;
+  for(usint i = 0; i < length; i++)
+  {
+    if(sequence[i] == 0) { end_markers.push_back(i); sequences++; }
+  }
+
+  usint* ranks = new usint[length];
+  #ifdef MULTITHREAD_SUPPORT
+  usint chunk = std::max((usint)1, sequences / (8 * this->threads));
+  #endif
+  #pragma omp parallel for schedule(dynamic, chunk)
+  for(usint i = 0; i < sequences; i++)
+  {
+    usint begin = (i > 0 ? end_markers[i - 1] + 1 : 0);
+    this->index->reportPositions(sequence + begin, end_markers[i] - begin, ranks + begin);
+  }
+
+  this->index->strip();
+
+  this->search_time += readTimer() - start;
+  return ranks;
+}
+
+//--------------------------------------------------------------------------
+
+void
+RLCSABuilder::addLongSequence(uchar* sequence, usint length, bool delete_sequence)
+{
+  double start = readTimer();
+  RLCSA* temp = new RLCSA(sequence, length, this->block_size, this->sample_rate, this->threads, 0, false);
+  this->build_time += readTimer() - start;
+  this->addRLCSA(temp, sequence, length, delete_sequence); 
+}
+
+void
+RLCSABuilder::addCollection(uchar* sequence, usint length, bool delete_sequence)
+{
+  double start = readTimer();
+  RLCSA* temp = new RLCSA(sequence, length, this->block_size, this->sample_rate, this->threads, delete_sequence);
+  this->build_time += readTimer() - start;
+  this->setRLCSA(temp);
+}
+
+//--------------------------------------------------------------------------
 
 } // namespace CSA

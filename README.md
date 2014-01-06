@@ -50,7 +50,6 @@ Processes from Step (2) require only a small amount of memory.
 
 To get started, please download the following example data (~25 MB). The rest of
 our example commands use these data files.
-
 ```
 mkdir example
 cd example
@@ -59,6 +58,7 @@ wget http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-2.fasta.gz
 wget http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-3.fasta.gz
 wget http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-4.fasta.gz
 wget http://www.cs.helsinki.fi/u/nvalimak/dsm-framework/toydata-5.fasta.gz
+gunzip toydata-?.fasta.gz
 ```
 
 
@@ -69,29 +69,35 @@ The input data for the dsm-framework must be in FASTA format. It is
 recommended that you first trim the FASTQ short-read data according
 to sequencing quality and output the trimmed short-reads as a FASTA file.
 
-Then the FASTA input files must first be preprocessed with builder:
-
+Then the FASTA input files must be preprocessed with:
 ```
     ./builder -v input.fasta
 ```
-
-It will output the resulting index under the filename `input.fasta.fmi`.
+It will output the resulting _index_ under the filename `input.fasta.fmi`.
 You should run `builder` independendly over each of your input datasets.
 The preprocessing can be parallelized by building multiple indexes
 simultaneously, however, these processes might require
 considerable amount of main-memory (depending on the input size).
 
+If you have access to a cluster environment with SLURM batch job system,
+you can use the following commands to build indexes for the example data.
+Notice that you might need to give the input filename with full directory 
+path according to your own cluster environment.
+```
+export DSM_FRAMEWORK_PATH=/path/to/dsm-framework/
+sbatch $DSM_FRAMEWORK_PATH/wrapper-SLURM/example-builder.sh toydata-1.fasta
+sbatch $DSM_FRAMEWORK_PATH/wrapper-SLURM/example-builder.sh toydata-2.fasta
+sbatch $DSM_FRAMEWORK_PATH/wrapper-SLURM/example-builder.sh toydata-3.fasta
+sbatch $DSM_FRAMEWORK_PATH/wrapper-SLURM/example-builder.sh toydata-4.fasta
+sbatch $DSM_FRAMEWORK_PATH/wrapper-SLURM/example-builder.sh toydata-5.fasta
+```
+See the specific scripts above for details and SLURM settings. 
 
-
-
-Use e.g. the script `distributebuild.sh` to build multiple indexes at
-once. The script expects a list of host names as standard
+Remark: If your cluster does not have SLURM, modify e.g. the script 
+`wrapper-simple/distributebuild.sh` to build multiple indexes at once. 
+The script expects a list of cluster node names as standard
 input. Please see the actual script to setup the correct paths to your
-fasta files etc. - The user will need to modify it to suite their own
-cluster environment.
-
-The current index uses 32 bit representation, thus, large input files
-need to be split into multiple indexes and client processes.
+fasta files etc. You will need to modify it to suite your own cluster environment.
 
 
 INITIALIZING THE SERVER
@@ -114,6 +120,32 @@ Options:
  --debug        More verbose but still safe.
  --outputall    Even more verbose (not safe).
 ```
+
+Here follows an example using the SLURM scripts. First, you need to construct
+a text file that contains a list of dataset names. In this example, you can use:
+```
+echo -e "toydata-1\ntoydata-2\ntoydata-3\ntoydata-4\ntoydata-5" > sample-names.txt
+```
+Thus, the resulting file `sample-names.txt` should look like
+```
+toydata-1
+toydata-2
+toydata-3
+toydata-4
+toydata-5
+```
+Then you can initialize the server-side processes using the attached script 
+```
+export DSM_FRAMEWORK_PATH=/path/to/dsm-framework/
+rm -fr tmp_dsmframework_config
+mkdir tmp_dsmframework_config
+$DSM_FRAMEWORK_PATH/wrapper-SLURM/example-server.sh sample-names.txt tmp_dsmframework_config
+```
+The script will store temporary configuration files under
+the directory `tmp_dsmframework_config/`. These files are used
+track the hostname of each server process so that the client-side
+processes know which hosts to connect to. The files also store the
+TCP port number and the (unique) hash associated with each server.
 
 
 RUNNING THE CLIENTS
@@ -141,7 +173,19 @@ Debug options:
  --debug        Print more progress information.
  --path <p>     Enumerate only below path p.
 ```
+Here follows an example on how to initialize the client side processes.
+First, you need to make sure that all the server-side processes are 
+up and running. Once you initialize the client proceseses, they will
+connect to the server processes, load the index and start the computation.
+Here, each client is assiciated with one index (i.e. one dataset).
+```
+export DSM_FRAMEWORK_PATH=/path/to/dsm-framework/
+$DSM_FRAMEWORK_PATH/wrapper-SLURM/example-client.sh sample-names.txt tmp_dsmframework_config
+```
+The resulting output is found under the files server-output*.txt.gz files.
+See the above example scripts and https://github.com/HIITMetagenomics for details. 
 
-The script `distribute.sh` gives an example how to distribute the client
-processes. - The user will need to modify it to suite their own
+Remark: If your cluster does not have SLURM, the script 
+`wrapper-simple/distribute.sh` gives an example how to distribute the client
+processes. You will need to modify it to suite your own
 cluster environment.

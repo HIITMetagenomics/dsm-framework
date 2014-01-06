@@ -4,6 +4,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <vector>
 #include <ctime>
 #include <cstring>
 #include <cassert>
@@ -19,6 +20,7 @@ bool color = false;      // Convert DNA to color codes?
 bool rotation = false;   // Build rotation index?
 unsigned patlen = 0;     // pattern length for rotation index
 
+
 void revstr(std::string &t)
 {
     char c;
@@ -27,6 +29,28 @@ void revstr(std::string &t)
         c = t[i];
         t[i] = t[n - i - 1];
         t[n - i - 1] = c;
+    }
+}
+
+void complement(std::string &t)
+{
+    for (std::string::iterator it = t.begin(); it != t.end(); ++it)
+    {
+        switch (*it)
+        {
+        case('T'):
+            *it = 'A';
+            break;
+        case('G'):
+            *it = 'C';
+            break;
+        case('C'):
+            *it = 'G';
+            break;
+        case('A'):
+            *it = 'T';
+            break;
+        }
     }
 }
 
@@ -155,44 +179,25 @@ void dna_to_color(string &text, string const &name)
     text = output;
 }
 
-void rotate(string &text, string const &name)
-{
-    assert(patlen != 0);
-    if (text.size() < patlen)
-    {
-        cerr << "Warning: sequence " << name << " was excluded from index: "
-             << "input was shorter than given pattern length!" << endl;
-        return;
-    }
-
-    string rotated = "";
-    for (ulong i = 0; i <= text.size() - patlen; ++i)
-    {
-        rotated += text.substr(i, patlen);
-        rotated += '#';
-        rotated += text.substr(i, patlen);
-    }
-    text = rotated;
-}
-
 
 void transform(string &text, string const &name, bool reverse)
 {
     assert(!(reverse && rotation));    
     normalize(text, name);
 
-    // Color transform first
+    // Color transform first (deprecated)
     if (color)
         dna_to_color(text, name);
 
-    // Reverse?
-//    std::cerr << "Warning: Reversing the string by default" << std::endl;
-//FIXME    if (reverse)
-        revstr(text);
+    // Appending a reverse complement
+    string revcmpl(text);
+    revstr(revcmpl);
+    complement(revcmpl);
+    text.append(1, '-');
+    text.append(revcmpl);
 
-    // Rotation index?
-    if (rotation)
-        rotate(text, name);
+    // Store everything reversed
+    revstr(text);
 }
 
 void build(istream *input, string const &outputfile, unsigned samplerate, bool reverse, ulong estimatedLength, time_t wctime)
@@ -220,11 +225,12 @@ void build(istream *input, string const &outputfile, unsigned samplerate, bool r
                 row = ss.str();
             }
 	    
-            if (0 /*verbose*/) 
+            if (verbose && i % 1000000 == 0) 
             {
-                cerr << "Inserting: " << row << " (";
-                if (estimatedLength)
-                    cerr << (100*j/estimatedLength) << "%, ";
+                cerr << "Inserting: " << row << " ("
+                     << j/(1024*1024) << " MB, ";
+//                if (estimatedLength)
+//                    cerr << (100*j/estimatedLength) << "%, ";
                 cerr << "elapsed " << std::difftime(time(NULL), wctime) << " s, " 
                      << std::difftime(time(NULL), wctime) / 3600 << " hours)" << endl;
             }
@@ -291,8 +297,6 @@ void print_help(char const *name)
          << "If no output filename is given, the index is stored as <input>.fmi" << endl
          << "or as <input>.rlcsa." << endl << endl
          << "Options:" << endl
-         << " -c, --color                   Convert DNA input into SOLiD color codes." << endl
-         << " -R <int>, --rotation <int>    Build a rotation index for reads of length <int>." << endl
          << " -s <int>, --sample-rate <int> Sampling rate for the index, a smaller number " << endl
          << "                               yields a bigger index but can decrease search " << endl
          << "                               time (default: " << TEXTCOLLECTION_DEFAULT_SAMPLERATE << ")." << endl
@@ -325,6 +329,7 @@ int atoi_min(char const *value, int min, char const *parameter, char const *name
 int main(int argc, char **argv) 
 {
     std::cerr << "Warning: Reversing the string by default" << std::endl;
+
     /**
      * Parse command line parameters
      */
@@ -338,8 +343,6 @@ int main(int argc, char **argv)
 
     static struct option long_options[] =
         {
-            {"color",       no_argument,       0, 'c'},
-            {"rotation",    required_argument, 0, 'R'},
             {"sample-rate", required_argument, 0, 's'},
             {"help",        no_argument,       0, 'h'},
             {"verbose",     no_argument,       0, 'v'},
@@ -347,18 +350,11 @@ int main(int argc, char **argv)
         };
     int option_index = 0;
     int c;
-    while ((c = getopt_long(argc, argv, "cR:s:hv",
+    while ((c = getopt_long(argc, argv, "cR:s:F:hv",
                             long_options, &option_index)) != -1) 
     {
         switch(c) 
         {
-        case 'c':
-            color = true; break;
-        case 'R':
-            patlen = atoi_min(optarg, 1, "-R, --rotation", argv[0]); 
-            rotation = true;
-            reverse = false;
-            break;
         case 's':
             samplerate = atoi_min(optarg, 1, "-s, --sample-rate", argv[0]); 
             break;
@@ -413,14 +409,14 @@ int main(int argc, char **argv)
     time_t wctime = time(NULL);
 
     // estimate the total input sequence length
-    fp->seekg(0, ios::end);
-    long estLength = fp->tellg();
+//    fp->seekg(0, ios::end);
+    long estLength = 1; //fp->tellg();
     if (estLength == -1)
     {
         cerr << "Warning: unable to estimate input file size" << endl;
         estLength = 0;
     }
-    fp->seekg(0);
+//    fp->seekg(0);
     
     /**
      * Build forward/rotation index

@@ -12,7 +12,7 @@ DeltaVector::DeltaVector(std::ifstream& file) :
 {
 }
 
-DeltaVector::DeltaVector(DeltaEncoder& encoder, usint universe_size) :
+DeltaVector::DeltaVector(Encoder& encoder, usint universe_size) :
   BitVector(encoder, universe_size)
 {
 }
@@ -58,7 +58,11 @@ DeltaVector::Iterator::rank(usint value, bool at_least)
 
   usint idx = this->sample.first + this->cur + 1;
   if(!at_least && this->val > value) { idx--; }
-  if(at_least && this->val < value)  { this->getSample(this->block + 1); }
+  if(at_least && this->val < value)
+  {
+    this->getSample(this->block + 1);
+    idx = this->sample.first + this->cur + 1;
+  }
   return idx;
 }
 
@@ -91,6 +95,27 @@ DeltaVector::Iterator::selectNext()
   this->cur++;
   this->val += this->buffer.readDeltaCode();
   return this->val;
+}
+
+pair_type
+DeltaVector::Iterator::valueBefore(usint value)
+{
+  const DeltaVector& par = (const DeltaVector&)(this->parent);
+
+  if(value >= par.size) { return pair_type(par.size, par.items); }
+
+  this->getSample(this->sampleForValue(value));
+  if(this->val > value) { return pair_type(par.size, par.items); }
+
+  while(this->cur < this->block_items && this->val < value)
+  {
+    usint temp = this->buffer.readDeltaCode(value - this->val);
+    if(temp == 0) { break; }
+    this->val += temp;
+    this->cur++;
+  }
+
+  return pair_type(this->val, this->sample.first + this->cur);
 }
 
 pair_type
@@ -187,5 +212,27 @@ DeltaEncoder::setBit(usint value)
   this->addNewBlock();
 }
 
+void
+DeltaEncoder::setRun(usint start, usint len)
+{
+  for(usint i = start; i < start + len; i++) { this->setBit(i); }
+}
+
+void
+DeltaEncoder::addBit(usint value)
+{
+  this->setBit(value);
+}
+
+void
+DeltaEncoder::addRun(usint start, usint len)
+{
+  this->setRun(start, len);
+}
+
+void
+DeltaEncoder::flush()
+{
+}
 
 } // namespace CSA

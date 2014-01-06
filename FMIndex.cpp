@@ -46,8 +46,9 @@ const char FMIndex::ALPHABET_SHIFTED[] = {1, ' '+1, '#'+1,
  * v14 uses HuffWT, 
  * v15 uses ulong C[c], 
  * v16 uses ulong codetable
+ * v17 uses BitRank for sampled 
  */
-const uchar FMIndex::versionFlag = 16;
+const uchar FMIndex::versionFlag = 17;
 
 /**
  * Given suffix i and substring length l, return T[SA[i] ... SA[i]+l].
@@ -124,8 +125,8 @@ FMIndex::FMIndex(uchar * bwt, ulong length, unsigned samplerate_, unsigned numbe
 void FMIndex::saveSamples(std::string const & filename)
 {
 //    makesamples();
+    cerr << "Saving samples for samplerate = " << samplerate << "..." << endl;
     maketables(n/samplerate+1, false);
-    cerr << "Saving samples..." << endl;
 
     std::string name = filename + ".sa";
     std::FILE *file = std::fopen(name.c_str(), "wb");
@@ -263,7 +264,7 @@ FMIndex::FMIndex(std::string const & filename, std::string const & samplefile = 
     uchar verFlag = 0;
     if (std::fread(&verFlag, 1, 1, file) != 1)
         throw std::runtime_error("file read error: incorrect version flag! Please reconstruct the index");
-    if (verFlag != FMIndex::versionFlag && verFlag != 15 && verFlag != 14)
+    if (verFlag != FMIndex::versionFlag && verFlag != 15 && verFlag != 14 && verFlag != 16)
         throw std::runtime_error("FMIndex::FMIndex(): invalid save file version.");
 //    cerr << "verFlag = " << (int)verFlag << endl;
     if (std::fread(&(this->n), sizeof(TextPosition), 1, file) != 1)
@@ -297,7 +298,9 @@ FMIndex::FMIndex(std::string const & filename, std::string const & samplefile = 
 
     if (safile)
     {
-        sampled = static_bitsequence::load(safile);
+        if (verFlag == 16)
+            cerr << "Warning: FMIndex::FMIndex(): invalid save file version?" << endl;
+        sampled = new BitRank(safile); //static_bitsequence::load(safile);
         suffixes = new BlockArray(safile);
         suffixDocId = new BlockArray(safile);
         textLength = new BlockArray(safile);
@@ -497,8 +500,8 @@ void FMIndex::makesamples()
     }
 
     BlockArray* positions = new BlockArray(n/samplerate+numberOfTexts, Tools::CeilLog2(this->n));
-    uint *sampledpositions = new uint[n/(sizeof(uint)*8)+1];
-    for (ulong i = 0; i < n / (sizeof(uint)*8) + 1; i++)
+    ulong *sampledpositions = new ulong[n/(sizeof(ulong)*8)+1];
+    for (ulong i = 0; i < n / (sizeof(ulong)*8) + 1; i++)
         sampledpositions[i] = 0;
     
     DocId textId = numberOfTexts;
@@ -511,7 +514,7 @@ void FMIndex::makesamples()
         uchar c = alphabetrank->access(p, alphabetrank_i_tmp);
         if (i % samplerate == 0 || c == '\0')
         {
-            set_field(sampledpositions,1,p,1);
+            Tools::SetField(sampledpositions,1,p,1);
             (*positions)[sampleCount] = p;
             sampleCount ++;
         }
@@ -527,8 +530,10 @@ void FMIndex::makesamples()
     }
     assert(textId == 0);
 
-    sampled = new static_bitsequence_brw32(sampledpositions, n, 16);
-    delete [] sampledpositions;
+    //sampled = new static_bitsequence_brw32(sampledpositions, n, 16);
+    //delete [] sampledpositions;
+    sampled = new BitRank(sampledpositions, n, true);
+    cerr << "rank1 = " << sampled->rank(n-1) << ", samplec = " << sampleCount << endl;
 
     // Suffixes store an offset from the text start position
     suffixes = new BlockArray(sampleCount, Tools::CeilLog2(n));
@@ -546,7 +551,7 @@ void FMIndex::makesamples()
             c = alphabetrank->access(p, alphabetrank_i_tmp);
         }
         assert((*positions)[i] < n);
-        ulong j = sampled->rank1((*positions)[i]);
+        ulong j = sampled->rank((*positions)[i]);
 
         assert(j != 0);
         (*suffixes)[j-1] = (x==n-1) ? 0 : x+1;
@@ -589,8 +594,8 @@ void FMIndex::maketables(ulong sampleLength, bool storePlainText)
     BlockArray *endmarkerDocId = new BlockArray(numberOfTexts, logNumberOfTexts);
 
     BlockArray* positions = new BlockArray(sampleLength, Tools::CeilLog2(this->n));
-    uint *sampledpositions = new uint[n/(sizeof(uint)*8)+1];
-    for (ulong i = 0; i < n / (sizeof(uint)*8) + 1; i++)
+    ulong *sampledpositions = new ulong[n/(sizeof(ulong)*8)+1];
+    for (ulong i = 0; i < n / (sizeof(ulong)*8) + 1; i++)
         sampledpositions[i] = 0;
     
     ulong x,p=bwtEndPos;
@@ -618,7 +623,7 @@ void FMIndex::maketables(ulong sampleLength, bool storePlainText)
 
         if ((posOfSuccEndmarker - i) % samplerate == 0 && c != '\0')
         {
-            set_field(sampledpositions,1,p,1);
+            Tools::SetField(sampledpositions,1,p,1); //set_field(sampledpositions,1,p,1);
             (*positions)[sampleCount] = p;
             sampleCount ++;
         }
@@ -656,9 +661,10 @@ void FMIndex::maketables(ulong sampleLength, bool storePlainText)
     else
         textStorage = 0;
 
-    sampled = new static_bitsequence_brw32(sampledpositions, n, 16);
-    delete [] sampledpositions;
-    assert(sampled->rank1(n-1) == sampleCount);
+    //sampled = new static_bitsequence_brw32(sampledpositions, n, 16);
+    //delete [] sampledpositions;
+    sampled = new BitRank(sampledpositions, n, true);
+    cerr << "rank1 = " << sampled->rank(n-1) << ", samplec = " << sampleCount << endl;
 
     // Suffixes store an offset from the text start position
     suffixes = new BlockArray(sampleCount, Tools::CeilLog2(maxTextLength));
@@ -677,7 +683,7 @@ void FMIndex::maketables(ulong sampleLength, bool storePlainText)
                 posOfSuccEndmarker = x--;
         }
         assert((*positions)[i] < n);
-        ulong j = sampled->rank1((*positions)[i]);
+        ulong j = sampled->rank((*positions)[i]);
 
         assert(j != 0); // if (j==0) j=sampleCount;
         

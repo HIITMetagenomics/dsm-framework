@@ -3,7 +3,7 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <cstring> // memset()
+#include <cstring>
 #include <fstream>
 #include <iostream>
 
@@ -14,115 +14,36 @@ namespace CSA
 {
 
 
-template<class Data>
-class GenericReadBuffer
+class ReadBuffer
 {
   public:
-    GenericReadBuffer(std::ifstream& file, usint words) :
-      size(words),
-      item_bits(1),
-      items(0),
-      free_buffer(true)
-    {
-      Data* buffer = new Data[this->size];
-      std::memset(buffer, 0, this->size * sizeof(Data));
-      file.read((char*)buffer, this->size * sizeof(Data));
-      this->data = buffer;
-      this->reset();
-    }
+    ReadBuffer(std::ifstream& file, usint words);
+    ReadBuffer(std::ifstream& file, usint _items, usint item_size);
 
-    GenericReadBuffer(std::ifstream& file, usint _items, usint item_size) :
-      item_bits(item_size),
-      items(_items),
-      free_buffer(true)
-    {
-      this->size = bitsToData(this->items * this->item_bits);
-      Data* buffer = new Data[this->size];
-      std::memset(buffer, 0, this->size * sizeof(Data));
-      file.read((char*)buffer, this->size * sizeof(Data));
-      this->data = buffer;
-      this->reset();
-    }
+    // These versions do not delete the data when deleted.
+    ReadBuffer(const usint* buffer, usint words);
+    ReadBuffer(const usint* buffer, usint _items, usint item_size);
+    ReadBuffer(const ReadBuffer& original);
 
-    // This version does not delete the data when deleted.
-    GenericReadBuffer(const Data* buffer, usint words) :
-      size(words),
-      item_bits(1),
-      items(0),
-      free_buffer(false)
-    {
-      this->data = buffer;
-      this->reset();
-    }
-
-    // This version does not delete the data when deleted.
-    GenericReadBuffer(const Data* buffer, usint _items, usint item_size) :
-      item_bits(item_size),
-      items(_items),
-      free_buffer(false)
-    {
-      this->size = bitsToData(this->items * this->item_bits);
-      this->data = buffer;
-      this->reset();
-    }
-
-    // This version does not delete the data when deleted.
-    GenericReadBuffer(const GenericReadBuffer& original) :
-      data(original.data),
-      size(original.size),
-      item_bits(original.item_bits),
-      items(original.items),
-      free_buffer(false)
-    {
-      this->reset();
-    }
-
-    ~GenericReadBuffer()
-    {
-      if(this->free_buffer)
-      {
-        delete[] this->data;
-      }
-    }
+    ~ReadBuffer();
 
 //--------------------------------------------------------------------------
 
-    void claimData()
-    {
-      this->free_buffer = true;
-    }
+    void claimData();
 
-    void writeBuffer(std::ofstream& file) const
-    {
-      file.write((const char*)this->data, this->size * sizeof(Data));
-    }
+    void writeBuffer(std::ofstream& file) const;
 
     // The buffer will no longer own the data.
-    void moveBuffer(const Data* buffer)
-    {
-      if(this->free_buffer)
-      {
-        delete[] this->data;
-      }
-      this->free_buffer = false;
+    void moveBuffer(const usint* buffer);
 
-      this->data = buffer;
-      this->reset();
-    }
-
-    usint reportSize() const
-    {
-      usint bytes = sizeof(*this);
-      if(this->free_buffer) { bytes += this->size * sizeof(Data); }
-      return bytes;
-    }
+    usint reportSize() const;
 
 //--------------------------------------------------------------------------
 
     inline void reset()
     {
       this->pos = 0;
-      this->bits = DATA_BITS;
+      this->bits = WORD_BITS;
       this->current = 0;
     }
 
@@ -135,15 +56,15 @@ class GenericReadBuffer
       }
 
       count -= this->bits;
-      this->pos += 1 + count / DATA_BITS;
-      this->bits = DATA_BITS - count % DATA_BITS;
+      this->pos += 1 + count / WORD_BITS;
+      this->bits = WORD_BITS - count % WORD_BITS;
     }
 
 //--------------------------------------------------------------------------
 
     inline usint bitsLeft() const
     {
-      return this->bits + DATA_BITS * (this->size - this->pos - 1);
+      return this->bits + WORD_BITS * (this->size - this->pos - 1);
     }
 
     // Returns nonzero if bit is 1
@@ -152,7 +73,7 @@ class GenericReadBuffer
       this->bits--;
       usint bit = this->data[this->pos] & ((usint)1 << this->bits);
 
-      if(this->bits == 0) { this->pos++; this->bits = DATA_BITS; }
+      if(this->bits == 0) { this->pos++; this->bits = WORD_BITS; }
 
       return bit;
     }
@@ -161,11 +82,11 @@ class GenericReadBuffer
     {
       usint value = 0;
 
-      while(count >= this->bits)
+      if(count >= this->bits)
       {
         count -= this->bits;
         value |= HIGHER(GET(this->data[this->pos], this->bits), count);
-        this->pos++; this->bits = DATA_BITS;
+        this->pos++; this->bits = WORD_BITS;
       }
       if(count > 0)
       {
@@ -174,6 +95,51 @@ class GenericReadBuffer
       }
 
       return value;
+    }
+
+//--------------------------------------------------------------------------
+
+    /*
+      These operations work on 4-bit nibbles.
+      Do not use these with the bit-level operations.
+    */
+
+    inline usint readNibble()
+    {
+      this->bits -= 4;
+      usint value = GET(LOWER(this->data[this->pos], this->bits), 4);
+
+      if(this->bits == 0) { this->pos++; this->bits = WORD_BITS; }
+
+      return value;
+    }
+
+    // Nibble code for positive integers.
+    inline usint readNibbleCode()
+    {
+      usint temp, value = 0, shift = 0;
+      do
+      {
+        temp = this->readNibble();
+        value |= (temp & 0x7) << shift;
+        shift += 3;
+      }
+      while((temp & 0x8) == 0);
+
+      return value + 1;
+    }
+
+    // This version reads the code only if value <= limit.
+    inline usint readNibbleCode(usint limit)
+    {
+       usint _pos = this->pos, _bits = this->bits;
+       usint value = this->readNibbleCode();
+       if(value > limit)
+       {
+         this->pos = _pos; this->bits = _bits;
+         return 0;
+       }
+       return value;
     }
 
 //--------------------------------------------------------------------------
@@ -191,8 +157,8 @@ class GenericReadBuffer
     inline void goToItem(usint item)
     {
       usint b = item * this->item_bits;
-      this->pos = b / DATA_BITS;
-      this->bits = DATA_BITS - b % DATA_BITS;
+      this->pos = b / WORD_BITS;
+      this->bits = WORD_BITS - b % WORD_BITS;
       this->current = item;
     }
 
@@ -216,17 +182,17 @@ class GenericReadBuffer
     inline usint readItemConst(usint item) const
     {
       usint b = item * this->item_bits;
-      usint p = b / DATA_BITS;
-      b = DATA_BITS - b % DATA_BITS;
+      usint p = b / WORD_BITS;
+      b = WORD_BITS - b % WORD_BITS;
 
       usint c = this->item_bits;
       usint value = 0;
 
-      while(c >= b)
+      if(c >= b)
       {
         c -= b;
         value |= HIGHER(GET(this->data[p], b), c);
-        p++; b = DATA_BITS;
+        p++; b = WORD_BITS;
       }
       if(c > 0)
       {
@@ -264,140 +230,70 @@ class GenericReadBuffer
       return temp;
     }
 
+    // This version reads the code only if value <= limit.
+    inline usint readDeltaCode(usint limit)
+    {
+       usint _pos = this->pos, _bits = this->bits;
+       usint value = this->readDeltaCode();
+       if(value > limit)
+       {
+         this->pos = _pos; this->bits = _bits;
+         return 0;
+       }
+       return value;
+    }
+
 //--------------------------------------------------------------------------
 
   private:
-    const Data* data;
+    const usint* data;
     usint size, item_bits, items;
     bool  free_buffer;
 
     // Iterator data
     usint pos, bits, current;
 
-    const static usint DATA_BITS = sizeof(Data) * CHAR_BIT;
-
-    inline static usint bitsToData(usint _bits) { return (_bits + DATA_BITS - 1) / DATA_BITS; }
+    inline static usint bitsToWords(usint _bits) { return (_bits + WORD_BITS - 1) / WORD_BITS; }
 
     // These are not allowed.
-    GenericReadBuffer();
-    GenericReadBuffer& operator = (const GenericReadBuffer&);
+    ReadBuffer();
+    ReadBuffer& operator = (const ReadBuffer&);
 };
 
 
 //--------------------------------------------------------------------------
 
 
-template<class Data>
-class GenericWriteBuffer
+class WriteBuffer
 {
   public:
-    GenericWriteBuffer(usint words) :
-      size(words),
-      item_bits(1),
-      items(0),
-      free_buffer(true)
-    {
-      this->data = new Data[words];
-      std::memset(this->data, 0, this->size * sizeof(Data));
-      this->reset();
-    }
+    WriteBuffer(usint words);
+    WriteBuffer(usint _items, usint item_size);
 
-    GenericWriteBuffer(usint _items, usint item_size) :
-      item_bits(item_size),
-      items(_items),
-      free_buffer(true)
-    {
-      this->size = bitsToData(this->items * this->item_bits);
-      this->data = new Data[this->size];
-      std::memset(this->data, 0, this->size * sizeof(Data));
-      this->reset();
-    }
+    // These versions do not delete the data when deleted.
+    WriteBuffer(usint* buffer, usint words);
+    WriteBuffer(usint* buffer, usint _items, usint item_size);
 
-    // This version does not delete the data when deleted.
-    GenericWriteBuffer(Data* buffer, usint words) :
-      size(words),
-      item_bits(1),
-      items(0),
-      free_buffer(false)
-    {
-      this->data = buffer;
-      this->reset();
-    }
-
-    // This version does not delete the data when deleted.
-    GenericWriteBuffer(Data* buffer, usint _items, usint item_size) :
-      item_bits(item_size),
-      items(_items),
-      free_buffer(false)
-    {
-      this->size = bitsToData(this->items * this->item_bits);
-      this->data = buffer;
-      this->reset();
-    }
-
-    ~GenericWriteBuffer()
-    {
-      if(this->free_buffer)
-      {
-        delete[] this->data;
-      }
-    }
+    ~WriteBuffer();
 
 //--------------------------------------------------------------------------
 
     // This transfers the ownership of the data to the read buffer.
-    GenericReadBuffer<Data>* getReadBuffer()
-    {
-      GenericReadBuffer<Data>* buffer;
-      if(this->items > 0)
-      {
-        buffer = new GenericReadBuffer<Data>(this->data, this->items, this->item_bits);
-      }
-      else
-      {
-        buffer = new GenericReadBuffer<Data>(this->data, this->size);
-      }
+    ReadBuffer* getReadBuffer();
 
-      if(this->free_buffer)
-      {
-        buffer->claimData();
-        this->free_buffer = false;
-      }
-
-      return buffer;
-    }
-
-    void writeBuffer(std::ofstream& file) const
-    {
-      file.write((char*)this->data, this->size * sizeof(Data));
-    }
+    void writeBuffer(std::ofstream& file) const;
 
     // The buffer will no longer own the data.
-    void moveBuffer(Data* buffer)
-    {
-      if(this->free_buffer)
-      {
-        delete[] this->data;
-      }
-      this->free_buffer = false;
+    void moveBuffer(usint* buffer);
 
-      this->data = buffer;
-      this->reset();
-    }
-
-    usint reportSize() const
-    {
-      usint bytes = sizeof(*this);
-      if(this->free_buffer) { bytes += this->size * sizeof(Data); }
-      return bytes;
-    }
+    usint reportSize() const;
 
 //--------------------------------------------------------------------------
 
     inline void reset()
     {
       this->pos = 0;
-      this->bits = DATA_BITS;
+      this->bits = WORD_BITS;
       this->current = 0;
     }
 
@@ -410,30 +306,41 @@ class GenericWriteBuffer
       }
 
       count -= this->bits;
-      this->pos += 1 + count / DATA_BITS;
-      this->bits = DATA_BITS - count % DATA_BITS;
+      this->pos += 1 + count / WORD_BITS;
+      this->bits = WORD_BITS - count % WORD_BITS;
     }
 
 //--------------------------------------------------------------------------
 
     inline usint bitsLeft() const
     {
-      return this->bits + DATA_BITS * (this->size - this->pos - 1);
+      return this->bits + WORD_BITS * (this->size - this->pos - 1);
     }
 
     inline void writeBits(usint value, usint count)
     {
-      while(count >= this->bits)
+      if(count >= this->bits)
       {
         count -= this->bits;
         this->data[this->pos] |= GET(LOWER(value, count), this->bits);
-        this->pos++; this->bits = DATA_BITS;
+        this->pos++; this->bits = WORD_BITS;
       }
       if(count > 0)
       {
         this->bits -= count;
         this->data[this->pos] |= HIGHER(GET(value, count), this->bits);
       }
+    }
+
+    // Returns nonzero if bit is 1
+    inline usint isSet(usint index)
+    {
+      return this->data[index / WORD_BITS] & ((usint)1 << (WORD_BITS - index % WORD_BITS - 1));
+    }
+
+    inline void setBit(usint index)
+    {
+      this->data[index / WORD_BITS] |= (usint)1 << (WORD_BITS - index % WORD_BITS - 1);
     }
 
 //--------------------------------------------------------------------------
@@ -450,8 +357,8 @@ class GenericWriteBuffer
     inline void goToItem(usint item)
     {
       usint b = item * this->item_bits;
-      this->pos = b / DATA_BITS;
-      this->bits = DATA_BITS - b % DATA_BITS;
+      this->pos = b / WORD_BITS;
+      this->bits = WORD_BITS - b % WORD_BITS;
       this->current = item;
     }
 
@@ -470,6 +377,47 @@ class GenericWriteBuffer
     {
       this->skipBits(this->item_bits);
       this->current++;
+    }
+
+//--------------------------------------------------------------------------
+
+    /*
+      Nibble coding for positive integers.
+    */
+
+    inline usint nibbleCodeLength(usint value) const
+    {
+      usint b = 0;
+      value--;
+
+      do
+      {
+        b += 4;
+        value >>= 3;
+      }
+      while(value > 0);
+
+      return b;
+    }
+
+    // Something breaks very badly if value > 15.
+    inline void writeNibble(usint value)
+    {
+      this->bits -= 4;
+      this->data[this->pos] |= HIGHER(value, this->bits);
+      if(this->bits == 0) { this->pos++; this->bits = WORD_BITS; }
+    }
+
+    // It is assumed that there is enough space for the code.
+    inline void writeNibbleCode(usint value)
+    {
+      value--;
+      while(value > 0x7)
+      {
+        this->writeNibble(value & 0x7);
+        value >>= 3;
+      }
+      this->writeNibble(value | 0x8);
     }
 
 //--------------------------------------------------------------------------
@@ -529,29 +477,23 @@ class GenericWriteBuffer
 //--------------------------------------------------------------------------
 
   private:
-    Data* data;
+    usint* data;
     usint size, item_bits, items;
     bool free_buffer;
 
     // Iterator data
     usint pos, bits, current;
 
-    const static usint DATA_BITS = sizeof(Data) * CHAR_BIT;
-
-    inline static usint bitsToData(usint _bits) { return (_bits + DATA_BITS - 1) / DATA_BITS; }
+    inline static usint bitsToWords(usint _bits) { return (_bits + WORD_BITS - 1) / WORD_BITS; }
 
     // These are not allowed.
-    GenericWriteBuffer();
-    GenericWriteBuffer(const GenericWriteBuffer&);
-    GenericWriteBuffer& operator = (const GenericWriteBuffer&);
+    WriteBuffer();
+    WriteBuffer(const WriteBuffer&);
+    WriteBuffer& operator = (const WriteBuffer&);
 };
 
 
 //--------------------------------------------------------------------------
-
-
-typedef GenericWriteBuffer<usint> WriteBuffer;
-typedef GenericReadBuffer<usint>  ReadBuffer;
 
 
 } // namespace CSA

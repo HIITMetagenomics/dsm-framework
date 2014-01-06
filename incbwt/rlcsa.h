@@ -4,33 +4,56 @@
 #include <fstream>
 #include <vector>
 
-#include "bits/vectors.h"
+#include "bits/deltavector.h"
+#include "bits/rlevector.h"
+#include "bits/nibblevector.h"
+#include "bits/succinctvector.h"
+
 #include "sasamples.h"
+#include "alphabet.h"
 #include "lcpsamples.h"
 #include "misc/parameters.h"
+#include "sampler.h"
+#include "suffixarray.h"
 
 
 namespace CSA
 {
 
 
-const std::string SA_EXTENSION = ".sa";
 const std::string PSI_EXTENSION = ".psi";
 const std::string ARRAY_EXTENSION = ".rlcsa.array";
 const std::string SA_SAMPLES_EXTENSION = ".rlcsa.sa_samples";
 const std::string PARAMETERS_EXTENSION = ".rlcsa.parameters";
+const std::string DOCUMENT_EXTENSION = ".rlcsa.docs";
 const std::string LCP_SAMPLES_EXTENSION = ".lcp_samples";
 const std::string PLCP_EXTENSION = ".plcp";
 
 
 const parameter_type RLCSA_BLOCK_SIZE  = parameter_type("RLCSA_BLOCK_SIZE", 32);
-const parameter_type SAMPLE_RATE       = parameter_type("SAMPLE_RATE", 512);
+const parameter_type SAMPLE_RATE       = parameter_type("SAMPLE_RATE", 128);
 const parameter_type SUPPORT_LOCATE    = parameter_type("SUPPORT_LOCATE", 1);
 const parameter_type SUPPORT_DISPLAY   = parameter_type("SUPPORT_DISPLAY", 1);
+const parameter_type WEIGHTED_SAMPLES  = parameter_type("WEIGHTED_SAMPLES", 0);
+
+
+#ifdef USE_NIBBLE_VECTORS
+typedef NibbleVector  PsiVector;
+#else
+typedef RLEVector     PsiVector;
+#endif
+
+#ifdef SUCCINCT_LCP_VECTOR
+typedef SuccinctVector PLCPVector;
+#else
+typedef RLEVector PLCPVector;
+#endif
 
 
 class RLCSA
 {
+  friend class RLCSABuilder;
+
   public:
 
 //--------------------------------------------------------------------------
@@ -42,41 +65,56 @@ class RLCSA
     RLCSA(const std::string& base_name, bool print = false);
 
     /*
-      If multiple_sequences is true, each 0 is treated as a end of sequence marker.
-      There must be nonzero characters between the 0s. data[bytes - 1] must also be 0.
-      FIXME Crashes if bytes >= 2 GB.
+      Build RLCSA for multiple sequences, treating each \0 as an end marker.
+      There must be nonzero characters between the \0s, and the last character must also be \0.
+      FIXME Crashes if bytes >= 4 GB.
     */ 
-    RLCSA(uchar* data, usint bytes, usint block_size, usint sa_sample_rate, bool multiple_sequences, bool delete_data);
+    RLCSA(uchar* data, usint bytes, usint block_size, usint sa_sample_rate, usint threads, bool delete_data);
+
+    /*
+      Same as before, but this time we build the suffix array for the ranks array.
+    */
+    RLCSA(uchar* data, usint* ranks, usint bytes, usint block_size, usint sa_sample_rate, usint threads, bool delete_data);
+
+    /*
+      Build an RLCSA for a single sequence, and use the samples given by sampler, if not 0.
+      The sequence does not contain an end marker.
+      FIXME This cannot be merged. Maybe should enforce it somehow.
+    */
+    RLCSA(uchar* data, usint bytes, usint block_size, usint sa_sample_rate, usint threads, Sampler* sampler, bool delete_data);
 
     // Destroys contents of index and increment.
-    // threads has no effect unless MULTITHREAD_SUPPORT is defined
     RLCSA(RLCSA& index, RLCSA& increment, usint* positions, usint block_size, usint threads = 1);
     ~RLCSA();
 
     void writeTo(const std::string& base_name) const;
 
-    bool isOk() const;
+    inline bool isOk() const { return this->ok; }
 
 //--------------------------------------------------------------------------
 //  QUERIES
 //--------------------------------------------------------------------------
 
-    // Returns the closed interval of suffix array containing the matches.
+    // These queries use SA ranges.
+
+    // Returns the closed range containing the matches.
     pair_type count(const std::string& pattern) const;
 
     // Used when merging CSAs.
     void reportPositions(uchar* data, usint length, usint* positions) const;
 
     // Returns SA[range]. User must free the buffer. Latter version uses buffer provided by the user.
-    usint* locate(pair_type range) const;
-    usint* locate(pair_type range, usint* data) const;
+    // Direct locate means locating one position at a time.
+    // Steps means that the returned values are the number of Psi steps taken, not SA values.
+    usint* locate(pair_type range, bool direct = false, bool steps = false) const;
+    usint* locate(pair_type range, usint* data, bool direct = false, bool steps = false) const;
 
     // Returns SA[index].
-    usint locate(usint index) const;
+    usint locate(usint index, bool steps = false) const;
 
     // Returns T^{sequence}[range]. User must free the buffer.
     // Third version uses buffer provided by the user.
-    uchar* display(usint sequence) const;
+    uchar* display(usint sequence, bool include_end_marker = false) const;
     uchar* display(usint sequence, pair_type range) const;
     uchar* display(usint sequence, pair_type range, uchar* data) const;
 
@@ -114,45 +152,40 @@ class RLCSA
     // Returns the number of equal letter runs in the BWT. Runs consisting of end markers are ignored.
     usint countRuns() const;
 
+    // Return the suffix array for a particular sequence. User must free the suffix array.
+    SuffixArray* getSuffixArrayForSequence(usint number) const;
+
 //--------------------------------------------------------------------------
-//  BASIC OPERATIONS
+//  SUPPORT FOR EXTERNAL MODULES: POSITIONS
 //--------------------------------------------------------------------------
 
-    // The return values of these functions include the implicit end markers.
-    // To get SA indexes, subtract getNumberOfSequences() from the value.
+    // The return values of these functions are BWT indexes/ranges.
 
-    inline usint psi(usint index) const
+    inline usint psi(usint sa_index) const
     {
-      if(index >= this->data_size)
+      if(sa_index >= this->data_size)
       {
         return this->data_size + this->number_of_sequences;
       }
 
-      usint c = this->getCharacter(index);
-      return this->psiUnsafe(index, c);
+      usint c = this->getCharacter(sa_index);
+      return this->psiUnsafe(sa_index, c);
     }
 
     // This version returns a run.
-    inline pair_type psi(usint index, usint max_length) const
+    inline pair_type psi(usint sa_index, usint max_length) const
     {
-      if(index >= this->data_size)
+      if(sa_index >= this->data_size)
       {
         return pair_type(this->data_size + this->number_of_sequences, 0);
       }
 
-      usint c = this->getCharacter(index);
-      RLEVector::Iterator iter(*(this->array[c]));
-      return iter.selectRun(index - this->index_ranges[c].first, max_length);
+      usint c = this->getCharacter(sa_index);
+      PsiVector::Iterator iter(*(this->array[c]));
+      return iter.selectRun(sa_index - this->alphabet->cumulative(c), max_length);
     }
 
-    inline usint C(usint c) const
-    {
-      if(c >= CHARS)
-          return this->data_size + this->number_of_sequences;
-      return this->index_ranges[c].first + this->number_of_sequences - 1;
-    }
-
-    inline usint LF(usint index, usint c) const
+    inline usint LF(usint sa_index, usint c) const
     {
       if(c >= CHARS)
       {
@@ -160,15 +193,54 @@ class RLCSA
       }
       if(this->array[c] == 0)
       {
-        if(c < this->text_chars[0]) { return this->number_of_sequences - 1; }
-        return this->index_ranges[c].first + this->number_of_sequences - 1;
+        if(c < this->alphabet->getFirstChar()) { return this->number_of_sequences - 1; }
+        return this->alphabet->cumulative(c) + this->number_of_sequences - 1;
       }
-      index += this->number_of_sequences;
+      this->convertToBWTIndex(sa_index);
 
-      RLEVector::Iterator iter(*(this->array[c]));
-      return this->LF(index, c, iter);
+      PsiVector::Iterator iter(*(this->array[c]));
+      return this->LF(sa_index, c, iter);
     }
 
+    inline void convertToSAIndex(usint& bwt_index) const { bwt_index -= this->number_of_sequences; }
+    inline void convertToBWTIndex(usint& sa_index) const { sa_index += this->number_of_sequences; }
+
+    inline bool hasImplicitSample(usint bwt_index) const
+    {
+      return (bwt_index < this->number_of_sequences);
+    }
+
+    inline usint getImplicitSample(usint bwt_index) const
+    {
+      DeltaVector::Iterator iter(*(this->end_points));
+      return iter.select(bwt_index) + 1;
+    }
+
+    // This is an unsafe function that returns a character value.
+    inline usint getCharacter(usint sa_index) const
+    {
+      return this->alphabet->charAt(sa_index);
+    }
+
+//--------------------------------------------------------------------------
+//  SUPPORT FOR EXTERNAL MODULES: RANGES
+//--------------------------------------------------------------------------
+
+    pair_type getSARange() const;
+    pair_type getBWTRange() const;
+    pair_type getCharRange(usint c) const;
+
+    void convertToBWTRange(pair_type& sa_range) const;
+    void convertToSARange(pair_type& bwt_range) const;
+    void convertToSARange(std::vector<pair_type>& bwt_ranges) const;
+
+    // This is an unsafe function that does not check its parameters.
+    pair_type LF(pair_type bwt_range, usint c) const;
+
+    // User must free the returned vector.
+    std::vector<usint>* locateRange(pair_type range) const;
+    std::vector<usint>* locateRanges(std::vector<pair_type>& ranges) const;
+    
 //--------------------------------------------------------------------------
 //  REPORTING
 //--------------------------------------------------------------------------
@@ -176,8 +248,9 @@ class RLCSA
     inline bool supportsLocate() const { return this->support_locate; }
     inline bool supportsDisplay() const { return this->support_display; }
     inline usint getSize() const { return this->data_size; }
+    inline usint getTextSize() const { return this->end_points->getSize(); }
     inline usint getNumberOfSequences() const { return this->number_of_sequences; }
-    inline usint getBlockSize() const { return this->array[this->text_chars[0]]->getBlockSize(); }
+    inline usint getBlockSize() const { return this->array[this->alphabet->getFirstChar()]->getBlockSize(); }
 
     // Returns the size of the data structure.
     usint reportSize(bool print = false) const;
@@ -191,21 +264,20 @@ class RLCSA
     // Optimized version:
     //   - Interleaves main loop with computing irreducible values.
     //   - Encodes maximal runs from a true local maximum to a true local minimum.
-    RLEVector* buildPLCP(usint block_size) const;
+    PLCPVector* buildPLCP(usint block_size) const; //, usint threads = 1) const;
 
     // Returns the number of samples. sampled_values will be a pointer to the samples.
     usint sampleLCP(usint sample_rate, pair_type*& sampled_values, bool report = false) const;
 
-    usint lcp(usint index, const LCPSamples& lcp_samples) const;
-    usint lcp(usint index, const LCPSamples& lcp_samples, const RLEVector& plcp) const;
+    usint lcp(usint sa_index, const LCPSamples& lcp_samples, bool steps = false) const;
 
     // Calculate LCP[index] directly.
-    usint lcpDirect(usint index) const;
+    usint lcpDirect(usint sa_index) const;
 
     // Writes PLCP[start] to PLCP[stop - 1].
-    inline void encodePLCPRun(RLEEncoder& plcp, usint start, usint stop, usint first_val) const
+    inline void encodePLCPRun(PLCPVector::Encoder& plcp, usint start, usint stop, usint first_val) const
     {
-      plcp.setRun(2 * start + first_val, stop - start);
+      plcp.addRun(2 * start + first_val, stop - start);
 //      std::cerr << "(" << start << ", " << stop << ", " << first_val << ")" << std::endl;
     }
 
@@ -214,23 +286,17 @@ class RLCSA
 //--------------------------------------------------------------------------
 
   private:
-    bool ok;
-
-    RLEVector* array[CHARS];
-    SASamples* sa_samples;
-
-    pair_type index_ranges[CHARS];
+    bool  ok;
     usint data_size;
 
-    usint text_chars[CHARS];  // which characters are present in the text
-    usint chars;
+    PsiVector* array[CHARS];
+    Alphabet*  alphabet;
+    SASamples* sa_samples;
 
-    usint index_pointers[CHARS]; // which of the above is at i * index_rate
-    usint index_rate;
+    bool  support_locate, support_display;
 
-    bool support_locate, support_display;
+    // A sequence starts at the next multiple of sample_rate after the end of previous sequence.
     usint sample_rate;
-
     usint number_of_sequences;
     DeltaVector* end_points;
 
@@ -238,60 +304,52 @@ class RLCSA
 //  INTERNAL VERSIONS OF QUERIES
 //--------------------------------------------------------------------------
 
-    void locateUnsafe(pair_type range, usint* data) const;
-    bool processRun(pair_type run, usint* data, usint* offsets, bool* finished, RLEVector::Iterator** iters) const;
-    void displayUnsafe(pair_type range, uchar* data) const;
+    void  directLocate(pair_type range, usint* data, bool steps) const;
+    usint directLocate(usint index, bool steps) const;
+    void  locateUnsafe(pair_type range, usint* data, bool steps) const;
+    bool  processRun(pair_type run, usint* data, usint* offsets, bool* finished, PsiVector::Iterator** iters, bool steps) const;
+    void  displayUnsafe(pair_type range, uchar* data, bool get_ranks = false, usint* ranks = 0) const;
+
+    void locateRange(pair_type range, std::vector<usint>& vec) const;
 
 //--------------------------------------------------------------------------
 //  INTERNAL VERSIONS OF BASIC OPERATIONS
 //--------------------------------------------------------------------------
 
-    inline usint psi(usint index, RLEVector::Iterator** iters) const
+    inline usint psi(usint index, PsiVector::Iterator** iters) const
     {
       usint c = this->getCharacter(index);
-      return iters[c]->select(index - this->index_ranges[c].first);
+      return iters[c]->select(index - this->alphabet->cumulative(c));
     }
 
-    inline pair_type psi(usint index, usint max_length, RLEVector::Iterator** iters) const
+    inline pair_type psi(usint index, usint max_length, PsiVector::Iterator** iters) const
     {
       usint c = this->getCharacter(index);
-      return iters[c]->selectRun(index - this->index_ranges[c].first, max_length);
+      return iters[c]->selectRun(index - this->alphabet->cumulative(c), max_length);
     }
 
     // Returns psi(index), assuming the suffix of rank index begins with c.
     inline usint psiUnsafe(usint index, usint c) const
     {
-      RLEVector::Iterator iter(*(this->array[c]));
+      PsiVector::Iterator iter(*(this->array[c]));
       return this->psiUnsafe(index, c, iter);
     }
 
     // As above, but with a given iterator.
-    inline usint psiUnsafe(usint index, usint c, RLEVector::Iterator& iter) const
+    inline usint psiUnsafe(usint index, usint c, PsiVector::Iterator& iter) const
     {
-      return iter.select(index - this->index_ranges[c].first);
+      return iter.select(index - this->alphabet->cumulative(c));
     }
 
     // As above, but returns the next value of psi.
-    inline usint psiUnsafeNext(usint c, RLEVector::Iterator& iter) const
+    inline usint psiUnsafeNext(usint c, PsiVector::Iterator& iter) const
     {
       return iter.selectNext();
     }
 
-    inline pair_type backwardSearchStep(pair_type range, usint c) const
+    inline usint LF(usint bwt_index, usint c, PsiVector::Iterator& iter) const
     {
-      if(this->array[c] == 0) { return EMPTY_PAIR; }
-      RLEVector::Iterator iter(*(this->array[c]));
-
-      usint start = this->index_ranges[c].first + this->number_of_sequences - 1;
-      range.first = start + iter.rank(range.first, true);
-      range.second = start + iter.rank(range.second);
-
-      return range;
-    }
-
-    inline usint LF(usint index, usint c, RLEVector::Iterator& iter) const
-    {
-      return this->index_ranges[c].first + this->number_of_sequences + iter.rank(index) - 1;
+      return this->alphabet->cumulative(c) + this->number_of_sequences + iter.rank(bwt_index) - 1;
     }
 
 //--------------------------------------------------------------------------
@@ -299,30 +357,23 @@ class RLCSA
 //--------------------------------------------------------------------------
 
     // Creates an array of iterators for every vector in this->array.
-    RLEVector::Iterator** getIterators() const;
-    void deleteIterators(RLEVector::Iterator** iters) const;
-
-    inline usint getCharacter(usint pos) const
-    {
-      const usint* curr = &(this->text_chars[this->index_pointers[pos / this->index_rate]]);
-      while(pos > this->index_ranges[*curr].second) { curr++; }
-      return *curr;
-    }
+    PsiVector::Iterator** getIterators() const;
+    void deleteIterators(PsiVector::Iterator** iters) const;
 
     void mergeEndPoints(RLCSA& index, RLCSA& increment);
     void mergeSamples(RLCSA& index, RLCSA& increment, usint* positions);
 
     void buildCharIndexes(usint* distribution);
+    void buildRLCSA(uchar* data, usint* ranks, usint bytes, usint block_size, usint threads, Sampler* sampler, bool multiple_sequences, bool delete_data);
+
+    // Removes structures not necessary for merging.
+    void strip();
 
     // These are not allowed.
     RLCSA();
     RLCSA(const RLCSA&);
     RLCSA& operator = (const RLCSA&);
 };
-
-
-// Returns the total number of characters.
-usint buildRanges(usint* distribution, pair_type* index_ranges);
 
 
 } // namespace CSA

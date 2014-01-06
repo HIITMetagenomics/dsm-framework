@@ -22,13 +22,22 @@ class VectorEncoder
     const static usint SUPERBLOCK_SIZE = MEGABYTE;
 
     // We assume superblock size is divisible by block and sample size.
-    VectorEncoder(usint block_bytes, usint superblock_size = SUPERBLOCK_SIZE);
+    VectorEncoder(usint block_bytes, usint superblock_size = SUPERBLOCK_SIZE, bool _use_small_blocks = true);
     ~VectorEncoder();
 
 /*
     This should be implemented in any inherited class.
 
+    // These functions are assumed to be greedy, encoding the 1-bits immediately.
     void setBit(usint value);  // Values must be in increasing order.
+    void setRun(usint start, usint len);
+
+    // These versions may combine 1-bits into maximal runs.
+    // Use flush() to finish the encoding when using these functions.
+    // Do not mix with the greedy versions.
+    void addBit(usint value);
+    void addRun(usint start, usint len);
+    void flush();
 */
 
     void addNewBlock();
@@ -36,6 +45,7 @@ class VectorEncoder
 
     usint size, items, blocks;
     usint block_size, superblock_bytes;
+    bool  use_small_blocks;
 
     WriteBuffer*      buffer;
 
@@ -67,6 +77,7 @@ class BitVector
 
     BitVector(std::ifstream& file);
     BitVector(VectorEncoder& encoder, usint universe_size);
+    BitVector(WriteBuffer& vector);
     ~BitVector();
 
 //--------------------------------------------------------------------------
@@ -81,6 +92,9 @@ class BitVector
     usint reportSize() const;
 
     usint getCompressedSize() const;
+
+    // Removes structures not necessary for merging.
+    void strip();
 
 //--------------------------------------------------------------------------
 
@@ -112,6 +126,16 @@ class BitVector
         usint sampleForIndex(usint index);
         usint sampleForValue(usint value);
 
+        inline usint getSampledIndex(usint sample_number)
+        {
+          return this->samples.readItem(2 * sample_number);
+        }
+
+        inline usint getSampledValue(usint sample_number)
+        {
+          return this->samples.readItem(2 * sample_number + 1);
+        }
+
         inline void getSample(usint sample_number)
         {
           this->block = sample_number;
@@ -133,13 +157,17 @@ class BitVector
 /*
     These should be implemented in any actual iterator.
 
-    // rank invalidates the iterator
+    // rank invalidates the "next" functionality
     // regular:   \sum_{i = 0}^{value} V[i]
     // at_least:  \sum_{i = 0}^{value - 1} V[i] + 1
     usint rank(usint value, bool at_least = false);
 
     usint select(usint index);      // \min value: \sum_{i = 0}^{value} V[i] = index + 1
     usint selectNext();
+
+    // (\max i <= value: V[i] = 1, rank(i) - 1)
+    // Returns (size, items) if not found.
+    pair_type valueBefore(usint value);
 
     pair_type valueAfter(usint value); // (\min i >= value: V[i] = 1, rank(i) - 1)
     pair_type nextValue();
@@ -154,8 +182,11 @@ class BitVector
     pair_type selectRun(usint index, usint max_length);
     pair_type selectNextRun(usint max_length);
 
-    // isSet invalidates the iterator
+    // isSet invalidates the "next" functionality
     bool isSet(usint value); // V[value]
+
+    // Counts the number of 1-bit runs.
+    usint countRuns();
 */
 
 //--------------------------------------------------------------------------
@@ -187,6 +218,14 @@ class BitVector
     */
     void indexForRank();
     void indexForSelect();
+
+    // These are used in disk storage.
+    void writeHeader(std::ofstream& file) const;
+    void writeArray(std::ofstream& file) const;
+    void readHeader(std::ifstream& file);
+    void readArray(std::ifstream& file);
+
+    void copyArray(VectorEncoder& encoder, bool use_directly = false);
 
     // These are not allowed.
     BitVector();

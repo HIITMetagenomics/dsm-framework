@@ -108,7 +108,7 @@ public:
         TextPosition tmp_rank_c = 0; // Cache rank value of c.
         TextPosition dist = 0;
         uchar c = alphabetrank->access(i, tmp_rank_c);
-        while (c != '\0' && !sampled->access(i))
+        while (c != '\0' && !sampled->IsBitSet(i))
         {
             i = C[c]+tmp_rank_c-1; //alphabetrank->rank(c,i)-1;
             c = alphabetrank->access(i, tmp_rank_c);
@@ -123,8 +123,8 @@ public:
         }
         else
         {
-            result.first = (*suffixDocId)[sampled->rank1(i)-1];
-            result.second = (*suffixes)[sampled->rank1(i)-1] + dist;
+            result.first = (*suffixDocId)[sampled->rank(i)-1];
+            result.second = (*suffixes)[sampled->rank(i)-1] + dist;
         }
     }
 
@@ -142,13 +142,13 @@ public:
             TextPosition i = sp;
             TextPosition dist = 0;
             uchar c = alphabetrank->access(i, tmp_rank_c);
-            while (c != '\0' && !sampled->access(i))
+            while (c != '\0' && !sampled->IsBitSet(i))
             {
                 i = C[c]+tmp_rank_c-1; //alphabetrank->rank(c,i)-1;
                 c = alphabetrank->access(i, tmp_rank_c);
                 ++ dist;
             }
-            TextPosition textPos = (*suffixes)[sampled->rank1(i)-1] + dist;
+            TextPosition textPos = (*suffixes)[sampled->rank(i)-1] + dist;
             result.push_back(textPos);
         }
     }
@@ -189,7 +189,8 @@ private:
     HuffWT *alphabetrank;
 
     // Sample structures for texts longer than samplerate
-    static_bitsequence * sampled;
+    //static_bitsequence * sampled;
+    BitRank * sampled;
     BlockArray *suffixes;
     BlockArray *suffixDocId;
 

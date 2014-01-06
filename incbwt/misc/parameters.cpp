@@ -18,21 +18,21 @@ Parameters::~Parameters()
 }
 
 bool
-Parameters::contains(const std::string& key)
+Parameters::contains(const std::string& key) const
 {
   return (this->parameters.find(key) != this->parameters.end());
 }
 
 usint
-Parameters::get(const std::string& key)
+Parameters::get(const std::string& key) const
 {
-  std::map<std::string, usint>::iterator iter = this->parameters.find(key);
+  std::map<std::string, usint>::const_iterator iter = this->parameters.find(key);
   if(iter == this->parameters.end()) { return 0; }
   return iter->second;
 }
 
 usint
-Parameters::get(const parameter_type& param)
+Parameters::get(const parameter_type& param) const
 {
   return this->get(param.first);
 }
@@ -76,23 +76,23 @@ void Parameters::read(const std::string& file_name)
 }
 
 void
-Parameters::print()
+Parameters::print() const
 {
   this->write(std::cout);
   std::cout << std::endl;
 }
 
 void
-Parameters::write(std::ostream& stream)
+Parameters::write(std::ostream& stream) const
 {
-  for(std::map<std::string, usint>::iterator iter = this->parameters.begin(); iter != this->parameters.end(); iter++)
+  for(std::map<std::string, usint>::const_iterator iter = this->parameters.begin(); iter != this->parameters.end(); iter++)
   {
     stream << iter->first << " = " << iter->second << std::endl;
   }
 }
 
 void
-Parameters::write(const std::string& file_name)
+Parameters::write(const std::string& file_name) const
 {
   std::ofstream file(file_name.c_str(), std::ios_base::binary);
   if(!file)

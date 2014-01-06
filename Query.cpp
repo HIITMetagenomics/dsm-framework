@@ -23,6 +23,7 @@ void Query::align(Pattern *p, unsigned k, unsigned &reported)
     this->patlen = p->size();
     this->klimit = k;
     this->sum = reported;
+    counterstart = callcounter;
     if (Pattern::getColor())
         ALPHABET = ALPHABET_SOLID;
 

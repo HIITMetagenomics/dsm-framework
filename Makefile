@@ -16,14 +16,26 @@ OBJS = InputReader.o OutputWriter.o Pattern.o TextCollection.o TextCollectionBui
 
 all: metaenumerate builder metaserver
 
-metaserver: metaserver.o ServerSocket.o 
-	$(CC) $(CPPFLAGS) -o metaserver metaserver.o ServerSocket.o
+fastqqualitytrim: fastqqualitytrim.o
+	$(CC) $(CPPFLAGS) -o fastqqualitytrim fastqqualitytrim.o
+
+maptoreads: $(LIBCDS) $(LIBRLCSA) maptoreads.o $(FMINDEXOBJS) $(OBJS)
+	$(CC) $(CPPFLAGS) -o maptoreads maptoreads.o $(FMINDEXOBJS) $(OBJS) $(LIBCDS) $(LIBRLCSA)
+
+aaaligner: $(LIBCDS) $(LIBRLCSA) aaaligner.o $(FMINDEXOBJS) $(OBJS)
+	$(CC) $(CPPFLAGS) -o aaaligner aaaligner.o $(FMINDEXOBJS) $(OBJS) $(LIBCDS) $(LIBRLCSA)
+
+metaserver: metaserver.o  ServerSocket.o
+	$(CC) $(CPPFLAGS) -o metaserver metaserver.o ServerSocket.o -lm
 
 metaenumerate: $(LIBCDS) $(LIBRLCSA) $(FMINDEXOBJS) $(OBJS) metaenumerate.o ClientSocket.o EnumerateQuery.o
 	$(CC) $(CPPFLAGS) -o metaenumerate metaenumerate.o $(OBJS) $(FMINDEXOBJS) $(LIBCDS) $(LIBRLCSA) $(PARALLEL_LIB) ClientSocket.o EnumerateQuery.o
 
 builder: $(LIBCDS) $(LIBRLCSA) $(FMINDEXOBJS) $(OBJS) builder.o
 	$(CC) $(CPPFLAGS) -o builder builder.o $(OBJS) $(FMINDEXOBJS) $(LIBCDS) $(LIBRLCSA)
+
+sabuilder: $(LIBCDS) $(LIBRLCSA) $(FMINDEXOBJS) $(OBJS) sabuilder.o
+	$(CC) $(CPPFLAGS) -o sabuilder sabuilder.o $(OBJS) $(FMINDEXOBJS) $(LIBCDS) $(LIBRLCSA)
 
 $(LIBRLCSA):
 	@make -C $(LIBRLCSAPATH) library

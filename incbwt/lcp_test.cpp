@@ -19,10 +19,10 @@ int main(int argc, char** argv)
     std::cout << "Usage: lcp_test basename queries runs modes [random_seed]" << std::endl;
     std::cout << std::endl;
     std::cout << "Supported modes:" << std::endl;
+    std::cout << "c -- Count the number of steps" << std::endl;
     std::cout << "d -- Direct LCP" << std::endl;
     std::cout << "p -- PLCP" << std::endl;
     std::cout << "s -- Sampled LCP" << std::endl;
-    std::cout << "h -- Hybrid: PLCP and Sampled LCP" << std::endl;
     std::cout << "l -- Locate" << std::endl;
     std::cout << "v -- Verify results" << std::endl;
     std::cout << std::endl;
@@ -38,17 +38,18 @@ int main(int argc, char** argv)
 
   std::string mode_string(argv[4]);
   usint modes = 0;
+  bool steps        = (mode_string.find('c') != std::string::npos);
   bool mode_direct  = (mode_string.find('d') != std::string::npos);
   bool mode_plcp    = (mode_string.find('p') != std::string::npos);
   bool mode_sampled = (mode_string.find('s') != std::string::npos);
-  bool mode_hybrid  = (mode_string.find('h') != std::string::npos);
   bool mode_locate  = (mode_string.find('l') != std::string::npos);
   bool mode_verify  = (mode_string.find('v') != std::string::npos);
+  if(steps) { mode_verify = false; }
   std::cout << "Modes: ";
+  if(steps)        { std::cout << "steps "; }
   if(mode_direct)  { std::cout << "direct "; modes++; }
   if(mode_plcp)    { std::cout << "plcp "; modes++; }
   if(mode_sampled) { std::cout << "sampled "; modes++; }
-  if(mode_hybrid)  { std::cout << "hybrid "; modes++; }
   if(mode_locate)  { std::cout << "locate "; }
   if(mode_verify)  { std::cout << "verify"; }
   std::cout << std::endl;
@@ -63,7 +64,7 @@ int main(int argc, char** argv)
   if(modes == 0 || queries == 0) { return 0; }
 
   RLCSA rlcsa(base_name);
-  if((mode_plcp || mode_hybrid) && !rlcsa.supportsLocate())
+  if(mode_plcp && !rlcsa.supportsLocate())
   {
     std::cerr << "Error: Locate is not supported!" << std::endl;
     return 2;
@@ -71,8 +72,8 @@ int main(int argc, char** argv)
   rlcsa.printInfo();
   rlcsa.reportSize(true);
 
-  RLEVector* plcp = 0;
-  if(mode_plcp || mode_hybrid)
+  PLCPVector* plcp = 0;
+  if(mode_plcp)
   {
     std::string plcp_name = base_name + PLCP_EXTENSION;
     std::ifstream plcp_file(plcp_name.c_str(), std::ios_base::binary);
@@ -81,7 +82,7 @@ int main(int argc, char** argv)
       std::cerr << "Error: Cannot open PLCP file!" << std::endl;
       return 3;
     }
-    plcp = new RLEVector(plcp_file);
+    plcp = new PLCPVector(plcp_file);
     std::cout << "PLCP:            " << (plcp->reportSize() / (double)MEGABYTE) << " MB" << std::endl;
     plcp_file.close();
   }
@@ -101,22 +102,6 @@ int main(int argc, char** argv)
     std::cout << "Sampled LCP:     " << (lcp->reportSize() / (double)MEGABYTE) << " MB" << std::endl;
     lcp_file.close();
   }
-
-  LCPSamples* minimal = 0;
-  if(mode_hybrid)
-  {
-    std::string minimal_name = base_name + ".minimal";
-    std::ifstream minimal_file(minimal_name.c_str(), std::ios_base::binary);
-    if(!minimal_file)
-    {
-      std::cerr << "Error: Cannot open minimal LCP sample file!" << std::endl;
-      delete plcp; delete lcp;
-      return 5;
-    }
-    minimal = new LCPSamples(minimal_file);
-    std::cout << "Minimal samples: " << (minimal->reportSize() / (double)MEGABYTE) << " MB" << std::endl;
-    minimal_file.close();
-  }
   std::cout << std::endl;
 
   srand(seed);
@@ -125,44 +110,50 @@ int main(int argc, char** argv)
   usint* results2 = new usint[queries];
   usint* results3 = new usint[queries];
   usint* results4 = new usint[queries];
-  usint* results5 = new usint[queries];
   for(usint i = 0; i < queries; i++)
   {
     positions[i] = rand() % rlcsa.getSize();
   }
   double start, time;
+  usint total;
 
   if(mode_direct)
   {
     std::cout << "Direct LCP computation:" << std::endl;
     for(usint j = 0; j < runs; j++)
     {
+      total = 0;
       start = readTimer();
       for(usint i = 0; i < queries; i++)
       {
         results1[i] = rlcsa.lcpDirect(positions[i]);
+        total += results1[i];
       }
       time = readTimer() - start;
       std::cout << queries << " queries in " << time << " seconds (" << (queries / time) << " / s)" << std::endl;
     }
+    if(steps) { std::cout << total << " steps (" << (((double)total) / queries) << " / query)" << std::endl; }
     std::cout << std::endl;
   }
 
   if(mode_plcp)
   {
     std::cout << "Using PLCP:" << std::endl;
-    RLEVector::Iterator iter(*plcp);
+    PLCPVector::Iterator iter(*plcp);
     for(usint j = 0; j < runs; j++)
     {
+      total = 0;
       start = readTimer();
       for(usint i = 0; i < queries; i++)
       {
-        usint pos = rlcsa.locate(positions[i]);
+        usint pos = rlcsa.locate(positions[i], steps);
+        total += pos;
         results2[i] = iter.select(pos) - 2 * pos;
       }
       time = readTimer() - start;
       std::cout << queries << " queries in " << time << " seconds (" << (queries / time) << " / s)" << std::endl;
     }
+    if(steps) { std::cout << total << " steps (" << (((double)total) / queries) << " / query)" << std::endl; }
     std::cout << std::endl;
   }
 
@@ -171,30 +162,17 @@ int main(int argc, char** argv)
     std::cout << "Using Sampled LCP:" << std::endl;
     for(usint j = 0; j < runs; j++)
     {
+      total = 0;
       start = readTimer();
       for(usint i = 0; i < queries; i++)
       {
-        results3[i] = rlcsa.lcp(positions[i], *lcp);
+        results3[i] = rlcsa.lcp(positions[i], *lcp, steps);
+        total += results3[i];
       }
       time = readTimer() - start;
       std::cout << queries << " queries in " << time << " seconds (" << (queries / time) << " / s)" << std::endl;
     }
-    std::cout << std::endl;
-  }
-
-  if(mode_hybrid)
-  {
-    std::cout << "Using hybrid approach:" << std::endl;
-    for(usint j = 0; j < runs; j++)
-    {
-      start = readTimer();
-      for(usint i = 0; i < queries; i++)
-      {
-        results4[i] = rlcsa.lcp(positions[i], *minimal, *plcp);
-      }
-      time = readTimer() - start;
-      std::cout << queries << " queries in " << time << " seconds (" << (queries / time) << " / s)" << std::endl;
-    }
+    if(steps) { std::cout << total << " steps (" << (((double)total) / queries) << " / query)" << std::endl; }
     std::cout << std::endl;
   }
 
@@ -203,14 +181,17 @@ int main(int argc, char** argv)
     std::cout << "Locate:" << std::endl;
     for(usint j = 0; j < runs; j++)
     {
+      total = 0;
       start = readTimer();
       for(usint i = 0; i < queries; i++)
       {
-        results5[i] = rlcsa.locate(positions[i]);
+        results4[i] = rlcsa.locate(positions[i], steps);
+        total += results4[i];
       }
       time = readTimer() - start;
       std::cout << queries << " queries in " << time << " seconds (" << (queries / time) << " / s)" << std::endl;
     }
+    if(steps) { std::cout << total << " steps (" << (((double)total) / queries) << " / query)" << std::endl; }
     std::cout << std::endl;
   }
 
@@ -219,26 +200,22 @@ int main(int argc, char** argv)
     for(usint i = 0; i < queries; i++)
     {
       bool ok = true;
-      ok &= !mode_direct  | !mode_plcp    | results1[i] == results2[i];
-      ok &= !mode_direct  | !mode_sampled | results1[i] == results3[i];
-      ok &= !mode_direct  | !mode_hybrid  | results1[i] == results4[i];
-      ok &= !mode_plcp    | !mode_sampled | results2[i] == results3[i];
-      ok &= !mode_plcp    | !mode_hybrid  | results2[i] == results4[i];
-      ok &= !mode_sampled | !mode_hybrid  | results3[i] == results4[i];
+      ok &= !mode_direct  | !mode_plcp    | (results1[i] == results2[i]);
+      ok &= !mode_direct  | !mode_sampled | (results1[i] == results3[i]);
+      ok &= !mode_plcp    | !mode_sampled | (results2[i] == results3[i]);
       if(!ok)
       {
         std::cout << "Query " << i << ": LCP[" << positions[i] << "] = ";
         if(mode_direct)  { std::cout << results1[i] << " (direct) ";  }
         if(mode_plcp)    { std::cout << results2[i] << " (plcp) ";    }
         if(mode_sampled) { std::cout << results3[i] << " (sampled) "; }
-        if(mode_hybrid)  { std::cout << results4[i] << " (hybrid) ";  }
         std::cout << std::endl;
       }
     }
   }
 
   delete[] positions;
-  delete[] results1; delete[] results2; delete[] results3; delete[] results4; delete[] results5;
-  delete plcp; delete lcp; delete minimal;
+  delete[] results1; delete[] results2; delete[] results3; delete[] results4;
+  delete plcp; delete lcp;
   return 0;
 }

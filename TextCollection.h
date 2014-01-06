@@ -55,11 +55,14 @@ public:
     // Return name/title of given sequence
     virtual std::string getName(DocId) const = 0;
 
+    //    virtual unsigned outputReads(ResultSet *) = 0; 
+
     // Return plain sequence
 //    virtual uchar const * getText(position_result const &) = 0;
 
     // Return total lenght of text (including 0-terminators).
     virtual TextPosition getLength() const = 0;
+    virtual DocId getNumberOfTexts() const = 0;
 
     // Return lenght of i'th text (excluding 0-terminators).
     virtual TextPosition getLength(DocId) const = 0;

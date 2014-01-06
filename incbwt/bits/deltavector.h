@@ -21,6 +21,11 @@ class DeltaEncoder : public VectorEncoder
     ~DeltaEncoder();
 
     void setBit(usint value);
+    void setRun(usint start, usint len);
+
+    void addBit(usint value);
+    void addRun(usint start, usint len);
+    void flush();
 
   protected:
 
@@ -38,8 +43,10 @@ class DeltaEncoder : public VectorEncoder
 class DeltaVector : public BitVector
 {
   public:
+    typedef DeltaEncoder Encoder;
+
     DeltaVector(std::ifstream& file);
-    DeltaVector(DeltaEncoder& encoder, usint universe_size);
+    DeltaVector(Encoder& encoder, usint universe_size);
     ~DeltaVector();
 
 //--------------------------------------------------------------------------
@@ -59,6 +66,7 @@ class DeltaVector : public BitVector
         usint select(usint index);
         usint selectNext();
 
+        pair_type valueBefore(usint value);
         pair_type valueAfter(usint value);
         pair_type nextValue();
 
@@ -67,8 +75,7 @@ class DeltaVector : public BitVector
 
         bool isSet(usint value);
 
-        // Counts the number of 1-bit runs.
-        usint countRuns();
+        usint countRuns();  // Not implemented.
 
       protected:
 

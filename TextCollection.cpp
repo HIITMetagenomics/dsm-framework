@@ -1,6 +1,6 @@
 #include "TextCollection.h"
 #include "FMIndex.h"
-#include "rlcsa_wrapper.h"
+//#include "rlcsa_wrapper.h"
 
 #include <iostream>
 #include <string>

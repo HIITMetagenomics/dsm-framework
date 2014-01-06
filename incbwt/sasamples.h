@@ -3,25 +3,44 @@
 
 #include <fstream>
 
-#include "misc/definitions.h"
+#include "sampler.h"
+#include "misc/utils.h"
 #include "bits/bitbuffer.h"
+
 #include "bits/deltavector.h"
 
+#ifdef SUCCINCT_SA_VECTOR
+#include "bits/succinctvector.h"
+#endif
 
 namespace CSA
 {
 
 
+#ifdef SUCCINCT_SA_VECTOR
+typedef SuccinctVector SAVector;
+#else
+typedef DeltaVector SAVector;
+#endif
+
+
 class SASamples
 {
   public:
+    #ifdef SUCCINCT_SA_VECTOR
+    const static usint INDEX_BLOCK_SIZE = 32;
+    #else
     const static usint INDEX_BLOCK_SIZE = 16;
+    #endif
 
-    SASamples(std::ifstream& sample_file, usint sample_rate);
+    SASamples(std::ifstream& sample_file, usint sample_rate, bool _weighted);
 
-    // These assume < 2 GB data. Use the second one when there are multiple sequences.
-    SASamples(uint* array, usint data_size, usint sample_rate);
-    SASamples(uint* inverse, DeltaVector* end_points, usint data_size, usint sample_rate);
+    // These assume < 4 GB data.
+    SASamples(short_pair* sa, DeltaVector* end_points, usint data_size, usint sample_rate, usint threads);
+    SASamples(short_pair* sa, Sampler* sampler, usint threads); // Use the given samples.
+
+    // Use these samples. Assumes regular sampling.
+    SASamples(pair_type* sample_pairs, usint data_size, usint sample_rate, usint threads);
 
     ~SASamples();
 
@@ -33,16 +52,10 @@ class SASamples
 
     void writeTo(std::ofstream& sample_file) const;
 
-    // Returns i such that SA[i] = value.
-    // If SA[i] is not sampled, returns the next sampled value. (Don't try!)
+    // Returns (i, inverseSA(i)) such that i is the last sampled position up to value.
     // Value is actual 0-based suffix array value.
-    // Returns size if value is too large.
-    inline usint inverseSA(usint value) const
-    {
-      if(value >= this->size) { return this->size; }
-      DeltaVector::Iterator iter(*(this->indexes));
-      return iter.select(this->inverse_samples->readItemConst(value / this->rate));
-    }
+    // Returns (size, size) if value is too large.
+    pair_type inverseSA(usint value) const;
 
     // Returns the value of ith sample in suffix array order.
     inline usint getSample(usint i) const
@@ -53,25 +66,48 @@ class SASamples
     // Returns (ind, sample number) where ind >= index or (size, ???).
     inline pair_type getFirstSampleAfter(usint index) const
     {
-      DeltaVector::Iterator iter(*(this->indexes));
+      SAVector::Iterator iter(*(this->indexes));
       return iter.valueAfter(index);
+    }
+
+    inline bool isSampled(usint index) const
+    {
+      SAVector::Iterator iter(*(this->indexes));
+      return iter.isSet(index);
+    }
+
+    inline usint getSampleAt(usint index) const
+    {
+      SAVector::Iterator iter(*(this->indexes));
+      return this->getSample(iter.rank(index) - 1);
     }
 
     inline usint getSampleRate() const { return this->rate; }
     inline usint getNumberOfSamples() const { return this->items; }
 
+    inline bool isWeighted() const { return this->weighted; }
+    inline bool supportsLocate() const { return (this->samples != 0); }
+    inline bool supportsDisplay() const { return (this->inverse_samples != 0); }
+
     usint reportSize() const;
 
+    // Removes structures not necessary for merging.
+    void strip();
+
   private:
-    usint integer_bits;
+    bool weighted;
     usint rate, size, items;
 
-    DeltaVector* indexes;
-
+    SAVector*   indexes;
     ReadBuffer* samples;
+
+    SAVector*   inverse_indexes;
     ReadBuffer* inverse_samples;
 
     void buildInverseSamples();
+
+    // Weighted case.
+    void buildSamples(pair_type* sample_pairs, bool inverse, usint threads);
 
     // Note: contents of original samples are deleted.
     void mergeSamples(SASamples& index, SASamples& increment, usint* positions, usint n, usint skip);

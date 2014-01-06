@@ -53,7 +53,7 @@ main(int argc, char** argv)
   std::cout << std::endl;
 
   RLCSA rlcsa(base_name);
-  std::clock_t start = std::clock();
+  clock_t start = clock();
   usint buffer_size = 0;
   if(argc > 2) { buffer_size = atoi(argv[2]); }
   usint n = rlcsa.getSize() + rlcsa.getNumberOfSequences();
@@ -85,7 +85,7 @@ main(int argc, char** argv)
     }
   }
 
-  std::clock_t stop = std::clock();
+  clock_t stop = clock();
   double time = ((stop - start) / (double)CLOCKS_PER_SEC);
   double megabytes = n / (double)MEGABYTE;
   std::cout << megabytes << " megabytes in " << time << " seconds (" << (megabytes / time) << " MB/s)" << std::endl;

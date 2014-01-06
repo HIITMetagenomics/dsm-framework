@@ -20,8 +20,13 @@ class RLEEncoder : public VectorEncoder
     RLEEncoder(usint block_bytes, usint superblock_size = VectorEncoder::SUPERBLOCK_SIZE);
     ~RLEEncoder();
 
-//    void setBit(usint value);
+    void setBit(usint value);
     void setRun(usint start, usint len);
+
+    // These versions try to combine the runs if possible.
+    void addBit(usint value);
+    void addRun(usint start, usint len);
+    void flush(); // Call this when finished.
 
     inline void RLEncode(usint diff, usint len)
     {
@@ -32,6 +37,7 @@ class RLEEncoder : public VectorEncoder
     }
 
   protected:
+    pair_type run;
 
     // These are not allowed.
     RLEEncoder();
@@ -47,8 +53,10 @@ class RLEEncoder : public VectorEncoder
 class RLEVector : public BitVector
 {
   public:
+    typedef RLEEncoder Encoder;
+
     RLEVector(std::ifstream& file);
-    RLEVector(RLEEncoder& encoder, usint universe_size);
+    RLEVector(Encoder& encoder, usint universe_size);
     ~RLEVector();
 
 //--------------------------------------------------------------------------
@@ -68,6 +76,7 @@ class RLEVector : public BitVector
         usint select(usint index);
         usint selectNext();
 
+        pair_type valueBefore(usint value);
         pair_type valueAfter(usint value);
         pair_type nextValue();
 
@@ -76,36 +85,11 @@ class RLEVector : public BitVector
 
         bool isSet(usint value);
 
-        // Counts the number of 1-bit runs.
         usint countRuns();
 
       protected:
 
-        inline void valueLoop(usint value)
-        {
-          this->getSample(this->sampleForValue(value));
-          this->run = 0;
-
-          if(this->val >= value) { return; }
-          while(this->cur < this->block_items)
-          {
-            this->val += this->buffer.readDeltaCode();
-            this->cur++;
-            this->run = this->buffer.readDeltaCode() - 1;
-            if(this->val >= value) { break; }
-
-            this->cur += this->run;
-            this->val += this->run;
-            if(this->val >= value)
-            {
-              this->run = this->val - value;
-              this->val = value;
-              this->cur -= this->run;
-              break;
-            }
-            this->run = 0;
-          }
-        }
+        void valueLoop(usint value);
 
         // These are not allowed.
         Iterator();

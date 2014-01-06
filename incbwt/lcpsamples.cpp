@@ -12,7 +12,7 @@ namespace CSA
 
 LCPSamples::LCPSamples(std::ifstream& sample_file)
 {
-  this->indexes = new DeltaVector(sample_file);
+  this->indexes = new LCPVector(sample_file);
   this->values = new Array(sample_file);
 
   this->size = indexes->getSize();
@@ -23,7 +23,7 @@ LCPSamples::LCPSamples(pair_type* input, usint _size, usint _items, bool report,
   size(_size),
   items(_items)
 {
-  DeltaEncoder index_encoder(LCPSamples::INDEX_BLOCK_SIZE);
+  LCPVector::Encoder index_encoder(LCPSamples::INDEX_BLOCK_SIZE);
   ArrayEncoder value_encoder(LCPSamples::VALUE_BLOCK_SIZE);
 
   usint max_sample = 0;
@@ -34,7 +34,7 @@ LCPSamples::LCPSamples(pair_type* input, usint _size, usint _items, bool report,
     max_sample = std::max(max_sample, input[i].second);
   }
 
-  this->indexes = new DeltaVector(index_encoder, this->size);
+  this->indexes = new LCPVector(index_encoder, this->size);
   this->values = new Array(value_encoder);
 
   if(free_input) { delete[] input; }
@@ -50,10 +50,10 @@ LCPSamples::LCPSamples(pair_type* input, usint _size, usint _items, bool report,
   }
 }
 
-LCPSamples::LCPSamples(DeltaEncoder& index_encoder, ArrayEncoder& value_encoder, usint _size) :
+LCPSamples::LCPSamples(LCPVector::Encoder& index_encoder, ArrayEncoder& value_encoder, usint _size) :
   size(_size)
 {
-  this->indexes = new DeltaVector(index_encoder, this->size);
+  this->indexes = new LCPVector(index_encoder, this->size);
   this->values = new Array(value_encoder);
   this->items = this->indexes->getNumberOfItems();
 }
