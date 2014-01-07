@@ -14,6 +14,14 @@ Submitted. Available online [arXiv:1308.6074](http://arxiv.org/abs/1308.6074)
 [q-bio.GN], 2013. 
 
 
+CHANGE LOG
+----
+
+* **2014-01-14** Added example scripts for the SLURM batch job system (under `wrapper-SLURM/`).
+                 Improved the server-side parallelization. Scaling was tested up to 256 (high-CPU) server-processes 
+                 and 50,944 simultaneous (low-CPU) client-threads divided over 29 cluster nodes.
+
+
 REQUIREMENTS AND COMPILING
 ----
 
@@ -180,7 +188,7 @@ Debug options:
 ```
 Here follows an example on how to initialize the client side processes.
 First, you need to make sure that all the server-side processes are 
-up and running - you might want to set up some SLURM job dependencies
+up and running - you might want to set up SLURM job dependencies
 to ensure that the server-side processes are started first. Once you 
 initialize the client processes, they will
 connect to the server processes, load the index and start the computation.
