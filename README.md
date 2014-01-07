@@ -160,14 +160,18 @@ dataset name. The server will compare the dataset name against its own
 list (see above).
 
 ```
-usage: ./metaenumerate [options] <index> <hostname>
+usage: ./metaenumerate [options] <index>
 
+  <stdin>       A list of server details, say 
+                    <hostname> <TCP port n:o> <hash>
+                to connect to.
+
+Mandatory options:
  <index>        Index file.
- <hostname>     Host to connect to.
 
 Options: 
  --check        Check integrity of index and quit.
- --port <p>     Connect to port <p>.
+ --fmin         Minimum frequency within the dataset.
  --verbose      Print progress information.
 Debug options:
  --debug        Print more progress information.
@@ -175,15 +179,19 @@ Debug options:
 ```
 Here follows an example on how to initialize the client side processes.
 First, you need to make sure that all the server-side processes are 
-up and running. Once you initialize the client proceseses, they will
+up and running - you might want to set up some SLURM job dependencies
+to ensure that the server-side processes are started first. Once you 
+initialize the client processes, they will
 connect to the server processes, load the index and start the computation.
-Here, each client is assiciated with one index (i.e. one dataset).
+Here, each client is associated with one index (i.e. one dataset).
 ```
 export DSM_FRAMEWORK_PATH=/path/to/dsm-framework/
 $DSM_FRAMEWORK_PATH/wrapper-SLURM/example-client.sh sample-names.txt tmp_dsmframework_config
 ```
-The resulting output is found under the files server-output*.txt.gz files.
-See the above example scripts and https://github.com/HIITMetagenomics for details. 
+The resulting output is found under the files server-output*.txt.gz.
+See the above example scripts and papers [1] and [2] for details. 
+More information and related Matlab packages are available at
+https://github.com/HIITMetagenomics
 
 Remark: If your cluster does not have SLURM, the script 
 `wrapper-simple/distribute.sh` gives an example how to distribute the client
