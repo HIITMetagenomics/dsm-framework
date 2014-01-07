@@ -14,7 +14,7 @@ Submitted. Available online [arXiv:1308.6074](http://arxiv.org/abs/1308.6074)
 [q-bio.GN], 2013. 
 
 
-CHANGE LOG
+CHANGELOG
 ----
 
 * **2014-01-14** Added example scripts for the SLURM batch job system (under `wrapper-SLURM/`).
