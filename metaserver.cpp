@@ -35,22 +35,22 @@ void print_usage(char const *name)
 
 void print_help(char const *name)
 {
-    cerr << "usage: " << name << " [options]" << endl
+    cerr << "usage: " << name << " [options] < names.txt" << endl
          << endl
-         << "  <stdin>       A list of expected library names." << endl
+         << "  names.txt         A list of expected library names (read from stdin)." << endl
          << endl 
          << "Mandatory option:" << endl
-         << "-E,--emax <double>      Maximum entropy to output." << endl  << endl
+         << " -E,--emax <double> Maximum entropy to output." << endl  << endl
       //         << "--discriminative <int>  Discriminative mining. " << endl << endl
          << "Other options:" << endl
-         << "-p,--port <p>     Listen to port number p." << endl
-         << "-P,--pmin <int>   p_min value." << endl
-         << "-e,--emin <double> Minimum entropy to output (default 0.0)" << endl
-         << "-F,--topfreq <p>  Print the top-p output frequencies." << endl
-         << "-T,--toptimes <p> Print the top-p latencies." << endl
-         << "-v,--verbose      Print progress information." << endl
-         << "--debug           More verbose but still safe." << endl
-         << "-A,--outputall    Even more verbose (not safe)." << endl;
+         << " -p,--port <p>      Listen to port number p." << endl
+         << " -P,--pmin <int>    p_min value." << endl
+         << " -e,--emin <double> Minimum entropy to output (default 0.0)" << endl
+         << " -F,--topfreq <p>   Print the top-p output frequencies." << endl
+         << " -T,--toptimes <p>  Print the top-p latencies." << endl
+         << " -v,--verbose       Print progress information." << endl
+         << " --debug            More verbose but still safe." << endl
+         << " -A,--outputall     Even more verbose (not safe)." << endl;
 }
 
 int atoi_min(char const *value, int min, char const *parameter, char const *name)

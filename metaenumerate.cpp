@@ -45,8 +45,8 @@ void print_help(char const *name)
     cerr << "usage: " << name << " [options] <index>  < hostinfo.txt" << endl
          << endl
          << " <index>        Index file." <<endl
-         << " hostinfo       Text file containing list of hosts to connect to," << endl
-         << "                port n:o, and path to enumerate." <<endl <<endl
+         << " hostinfo.txt   Text file containing list of hosts to connect to," << endl
+         << "                port n:o, and path to enumerate (read from stdin)." <<endl <<endl
          << "Options: " <<endl
          << " --check        Check integrity of index and quit." << endl
          << " --port <p>     Connect to port <p>." <<endl
@@ -156,6 +156,7 @@ int main(int argc, char **argv)
             {"maxdepth",  required_argument, 0, 'M'},
             {"check",     no_argument,       0, 'C'},
             {"verbose",   no_argument,       0, 'v'},
+            {"help",      no_argument,       0, 'h'},
             {"debug",     no_argument,       0, long_opt_debug},
             {0, 0, 0, 0}
         };
@@ -180,7 +181,7 @@ int main(int argc, char **argv)
             debug = true; break;
         case '?': 
         case 'h':
-            print_usage(argv[0]);
+            print_help(argv[0]);
             return 1;
         default:
             print_usage(argv[0]);

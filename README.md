@@ -108,19 +108,23 @@ list of dataset names as input. This list must match the dataset names
 that the clients use when they connect to the server.
 
 ```
-Usage: ./metaserver [options]
+usage: ./metaserver [options] < names.txt
 
-  <stdin>       A list of expected dataset names.
+  names.txt         A list of expected library names (read from stdin).
 
-Options:
- --port <p>     Listen to port number p.
- --topfreq <p>  Print the top-p output frequencies.
- --toptimes <p> Print the top-p latencies.
- --verbose      Print progress information.
- --debug        More verbose but still safe.
- --outputall    Even more verbose (not safe).
+Mandatory option:
+ -E,--emax <double> Maximum entropy to output.
+
+Other options:
+ -p,--port <p>      Listen to port number p.
+ -P,--pmin <int>    p_min value.
+ -e,--emin <double> Minimum entropy to output (default 0.0)
+ -F,--topfreq <p>   Print the top-p output frequencies.
+ -T,--toptimes <p>  Print the top-p latencies.
+ -v,--verbose       Print progress information.
+ --debug            More verbose but still safe.
+ -A,--outputall     Even more verbose (not safe).
 ```
-
 Here follows an example using the SLURM scripts. First, you need to construct
 a text file that contains a list of dataset names. In this example, you can use:
 ```
@@ -160,22 +164,19 @@ dataset name. The server will compare the dataset name against its own
 list (see above).
 
 ```
-usage: ./metaenumerate [options] <index>
+usage: ./metaenumerate [options] <index>  < hostinfo.txt
 
-  <stdin>       A list of server details, say 
-                    <hostname> <TCP port n:o> <hash>
-                to connect to.
-
-Mandatory options:
  <index>        Index file.
+ hostinfo.txt   A list of server details, say 
+                   <hostname> <TCP port n:o> <hash>
+                to connect to (read from stdin).
 
-Options: 
+Options:
  --check        Check integrity of index and quit.
- --fmin         Minimum frequency within the dataset.
+ --port <p>     Connect to port <p>.
  --verbose      Print progress information.
 Debug options:
  --debug        Print more progress information.
- --path <p>     Enumerate only below path p.
 ```
 Here follows an example on how to initialize the client side processes.
 First, you need to make sure that all the server-side processes are 
