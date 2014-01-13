@@ -44,9 +44,11 @@ void print_help(char const *name)
       //         << "--discriminative <int>  Discriminative mining. " << endl << endl
          << "Other options:" << endl
          << " -p,--port <p>      Listen to port number p." << endl
-         << " -P,--pmin <int>    p_min value (min. number of samples to have occ's in)." << endl
-         << " --pmax <int>       p_max value (max. number of samples to have occ's in)." << endl
-         << "                    Set p_min=p_max=1 to output sample-specific substrings." << endl
+         << " -P,--pmin <int>    p_min value (min. number of samples to have occ's in)," << endl
+         << "                    default 2." << endl
+         << " --pmax <int>       p_max value (max. number of samples to have occ's in)," << endl
+         << "                    default no-limit. Set p_min=p_max=1 to restrict the" << endl
+         << "                    output to sample-specific substrings." << endl
          << " -e,--emin <double> Minimum entropy to output (default 0.0)" << endl
          << " -F,--topfreq <p>   Print the top-p output frequencies." << endl
          << " -T,--toptimes <p>  Print the top-p latencies." << endl
