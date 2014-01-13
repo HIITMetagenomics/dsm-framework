@@ -49,9 +49,9 @@ around the main C/C++ program. We provide example wrapper-scripts for the
 _SLURM batch job system_. The main computation is divided over
 
 1. preprocessing of each dataset (`builder`),
-2. 64-256 _CPU intensive_ processes (`metaserver`), and
-3. _memory intensive_ processes which use very little CPU (`metaenumerate`).
-4. Post-processing of the mined data (see e.g. `wrapper-distance-matrix/smtxt2entropy.c`).
+2. 64-256 _CPU intensive_ processes (`metaserver`), 
+3. _memory intensive_ processes which use very little CPU (`metaenumerate`), and
+4. post-processing of the mined substrings (see e.g. `wrapper-distance-matrix/smtxt2entropy.c`).
 
 The preprocessing step (1) is ran separately from (2) and (3). 
 Steps (2) and (3) are run in parallel so that (2) is started first. The 
