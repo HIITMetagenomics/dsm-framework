@@ -17,7 +17,8 @@ Submitted. Available online [arXiv:1308.6074](http://arxiv.org/abs/1308.6074)
 CHANGELOG
 ----
 
-* **2014-01-14** Added example scripts for the SLURM batch job system (under `wrapper-SLURM/`).
+* **2014-01-13** Added `wrapper-distance-matrix/smtxt2entropy.c` that was used in the experiments of [2].
+* **2014-01-04** Added example scripts for the SLURM batch job system (under `wrapper-SLURM/`).
                  Improved the server-side parallelization. Scaling was tested up to 256 (high-CPU) server-processes 
                  and 50,944 simultaneous (low-CPU) client-threads divided over 29 cluster nodes.
 
@@ -50,6 +51,7 @@ _SLURM batch job system_. The main computation is divided over
 1. preprocessing of each dataset (`builder`),
 2. 64-256 _CPU intensive_ processes (`metaserver`), and
 3. _memory intensive_ processes which use very little CPU (`metaenumerate`).
+4. Post-processing of the mined data (see e.g. `wrapper-distance-matrix/smtxt2entropy.c`).
 
 The preprocessing step (1) is ran separately from (2) and (3). 
 Steps (2) and (3) are run in parallel so that (2) is started first. The 
@@ -206,3 +208,18 @@ Remark: If your cluster does not have SLURM, the script
 `wrapper-simple/distribute.sh` gives an example how to distribute the client
 processes. You will need to modify it to suite your own
 cluster environment.
+
+
+POST-PROCESSING THE MINED SUBSTRINGS
+---
+
+The experiments in paper [2] use the script given in `wrapper-distance-matrix/smtxt2entropy.c`. 
+You can compile and run it as follows:
+```
+cd /path/to/dsm-framework/wrapper-distance-matrix
+gcc -Wall -O2 -o smtxt2entropy smtxt2entropy.c -lm
+../metaserver [server-side-parameters] | ./smtxt2entropy -v -s <nsamples> -e <estep> -N <normf> -F <outputfile>
+```
+where `<nsamples>` is the number of samples, `<estep>` is the stepping to consider all values (0;estep;1),
+`<normf>` is the file storing a list of normalization factors (if needed), and `<outputfile>` is the 
+output filename prefix.
