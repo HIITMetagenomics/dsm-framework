@@ -25,7 +25,7 @@ typedef unordered_set<unsigned> readerset;
 /**
  * Definitions for parsing command line options
  */
-enum parameter_t { long_opt_debug = 256, long_opt_discriminative };
+enum parameter_t { long_opt_debug = 256, long_opt_discriminative, long_opt_pmax };
 
 void print_usage(char const *name)
 {
@@ -44,7 +44,9 @@ void print_help(char const *name)
       //         << "--discriminative <int>  Discriminative mining. " << endl << endl
          << "Other options:" << endl
          << " -p,--port <p>      Listen to port number p." << endl
-         << " -P,--pmin <int>    p_min value." << endl
+         << " -P,--pmin <int>    p_min value (min. number of samples to have occ's in)." << endl
+         << " --pmax <int>       p_max value (max. number of samples to have occ's in)." << endl
+         << "                    Set p_min=p_max=1 to output sample-specific substrings." << endl
          << " -e,--emin <double> Minimum entropy to output (default 0.0)" << endl
          << " -F,--topfreq <p>   Print the top-p output frequencies." << endl
          << " -T,--toptimes <p>  Print the top-p latencies." << endl
@@ -121,6 +123,7 @@ unsigned mindepth = 0;
 bool discriminative = false;
 int fisheralt = 0;
 unsigned pmin = 2;
+unsigned pmax = 0;
 double emin = 0.0;
 double emax = -1.0;
 double smallest_entropy = 1000.0;
@@ -308,29 +311,9 @@ void traverse(readerset const &treaders)
     if (treaders.size() == 1 && pmin > 1)
     {
         readerset::const_iterator it = treaders.begin();
-//        if (pmin > 1)
-//        {
-            //ulong tmp = total_paths;
-            //cerr << "traverseOne called! sending msg to depth = " << path.size() << endl;
-            //if (!haltSent)
-            //    allreaders[*it]->sendHalt(path.size());
-            traverseOne(*it);
-            //cerr << total_paths-tmp << " paths returned" << endl;
-//        }
-//        else
-//        {
-//            traverseOneWithOutput(*it); // FIXME does not check the value of 'discriminative'
-//                                        // FIXME does not output pvalues or entropies
-//        }
+        traverseOne(*it);
         return;
     }
-    /*else if (treaders.size() < pmin && haltSent == 0)
-    {
-        haltSent = path.size();
-        //cerr << "Sending halt to " << treaders.size() << " treaders." << endl;
-        for (readerset::const_iterator it = treaders.begin(); it != treaders.end(); ++it)
-            allreaders[*it]->sendHalt(path.size());
-            }*/
 
 
     // Iterate and collect children
@@ -352,9 +335,6 @@ void traverse(readerset const &treaders)
         path.resize (path.size () - 1);
         children[i].clear(); // Close the subtree.
     } 
-
-//    if (haltSent == path.size())
-//        haltSent = 0;
 
     // No output for empty path
     if (path.empty()) return;
@@ -424,8 +404,8 @@ void traverse(readerset const &treaders)
     bool output = true;
     if (path.size() < mindepth)
         output = false;
-    //if (treaders.size() == allreaders.size())
-    //    output = false; // pmax disabled FIXME
+    if (pmax != 0 && treaders.size() > pmax)
+        output = false;
     if (treaders.size() < pmin)
         output = false;
     if (emax > 0 && (entropy < emin || entropy > emax))
@@ -536,6 +516,7 @@ int main(int argc, char **argv)
         {
             {"discriminative", required_argument, 0, long_opt_discriminative},
             {"pmin",           required_argument, 0, 'P'},
+            {"pmax",           required_argument, 0, long_opt_pmax},
             {"port",           required_argument, 0, 'p'},
             {"mindepth",       required_argument, 0, 'm'},
             {"emin",           required_argument, 0, 'e'},
@@ -563,6 +544,8 @@ int main(int argc, char **argv)
             break;
         case 'P':
             pmin = atoi_min(optarg, 1, "-P, --pmin", argv[0]) ; break;
+        case long_opt_pmax:
+            pmax = atoi_min(optarg, 1, "--pmax", argv[0]) ; break;
         case 'p':
             portno = atoi_min(optarg, 1024, "-p, --port", argv[0]) ; break;
         case 'm':
