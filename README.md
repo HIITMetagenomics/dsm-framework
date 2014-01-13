@@ -214,7 +214,7 @@ POST-PROCESSING THE MINED SUBSTRINGS
 ---
 
 The experiments in paper [2] use the script given in `wrapper-distance-matrix/smtxt2entropy.c`. 
-You can compile and run it as follows:
+You can compile and run it to directly post-process the output from `metaserver` in your scripts:
 ```
 cd /path/to/dsm-framework/wrapper-distance-matrix
 gcc -Wall -O2 -o smtxt2entropy smtxt2entropy.c -lm
