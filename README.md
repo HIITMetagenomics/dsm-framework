@@ -127,7 +127,11 @@ Mandatory option:
 
 Other options:
  -p,--port <p>      Listen to port number p.
- -P,--pmin <int>    p_min value.
+ -P,--pmin <int>    p_min value (min. number of samples to have occ's in),
+                    default 2.
+ --pmax <int>       p_max value (max. number of samples to have occ's in),
+                    default no-limit. Set p_min=p_max=1 to restrict the 
+                    output to sample-specific substrings.
  -e,--emin <double> Minimum entropy to output (default 0.0)
  -F,--topfreq <p>   Print the top-p output frequencies.
  -T,--toptimes <p>  Print the top-p latencies.
