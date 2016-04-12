@@ -10,8 +10,9 @@ in Bioinformatics (WABI'12)_, Springer-Verlag, LNCS 7534, pages
 441-452, Ljubljana, Slovenia, September 9-14, 2012.
 - [2] Sohan Seth, Niko Välimäki, Samuel Kaski and Antti Honkela: **Exploration 
 and retrieval of whole-metagenome sequencing samples**. 
-Submitted. Available online [arXiv:1308.6074](http://arxiv.org/abs/1308.6074) 
-[q-bio.GN], 2013. 
+_Bioinformatics_, Vol. 30, No. 17, pages 2471-2479.
+doi: 10.1093/bioinformatics/btu340,
+May 19, 2014. 
 
 
 CHANGELOG
